@@ -593,7 +593,7 @@ async function saveMany(list) {
   if (!list.length) return;
   if (!(IS_IOS && CAN_SHARE_FILES)) {   // Android / desktop / iOS over plain http → attachment download
     list.forEach((x, i) => setTimeout(() => anchorDownload(x.url, x.name), i * 700));
-    if (IS_IOS && !window.isSecureContext) { toast(`Downloading → Files › Downloads. To save straight to Photos, open Faceoff at https://${location.hostname}:8448`, 6000); return; }
+    if (IS_IOS && !window.isSecureContext) { toast('Downloading → Files › Downloads. To save straight to Photos, open Faceoff over HTTPS (see README → HTTPS).', 6000); return; }
     toast(list.length > 1 ? `Downloading ${list.length} files…` : `Downloading ${list[0].name}`, 2500); return;
   }
   // iPhone/iPad over HTTPS: fetch → File → share sheet → “Save Video”/“Save Image” puts it in Photos (or “Save to Files”)
