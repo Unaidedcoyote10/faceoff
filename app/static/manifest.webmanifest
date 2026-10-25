@@ -1,7 +1,7 @@
 {
   "name": "Faceoff \u2014 face redaction",
   "short_name": "Faceoff",
-  "description": "Self-hosted face blur / black-box for photos",
+  "description": "Self-hosted face blur or black-box for photos, plus keyword redaction for documents",
   "start_url": "/#upload",
   "scope": "/",
   "display": "standalone",

@@ -5,8 +5,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     DATA_DIR=/data EXPORT_DIR=/export YUNET_MODEL=/app/models/face_detection_yunet_2023mar.onnx
 
 WORKDIR /app
+# Tesseract (English only) for keyword redaction of scans and photos. No neural OCR model.
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -c "import pytesseract,pypdfium2; print('docs', pytesseract.get_tesseract_version())"
 
 # Bundle the YuNet face detector (OpenCV Zoo, MIT licence) at build time
 ADD https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx /app/models/face_detection_yunet_2023mar.onnx

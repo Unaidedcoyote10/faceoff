@@ -29,6 +29,7 @@ function go(tab) {
   history.replaceState(null, '', '#' + tab);
   if (tab === 'gallery') loadGallery();
   if (tab === 'settings') { loadSettings(); loadIG(); }
+  if (tab === 'docs') loadDocs();
   if (tab === 'saved') savedOpen(); else savedLeave();
   window.scrollTo({ top: 0 });
 }
@@ -185,15 +186,21 @@ let lp; $('#grid').addEventListener('touchstart', e => { const t = e.target.clos
 seg($('#viewMode'), view, v => { view = v; localStorage.setItem('fo.view', v); renderGrid(); });
 
 let sig = '';
+let photoPend = 0, docPend = 0;
+function setPill() {
+  const n = photoPend + docPend;
+  $('#queuePill').classList.toggle('hidden', !n);
+  $('#queueText').textContent = `${n} processing`;
+}
 async function loadGallery() {
   try { const d = await api('/api/images'); const ns = JSON.stringify(d.items.map(i => [i.id, i.status, i.v, i.progress]));
     items = d.items; if (ns !== sig) { sig = ns; renderGrid(); renderBatch(); }
-    const pend = (d.counts.queued || 0) + (d.counts.processing || 0);
-    $('#queuePill').classList.toggle('hidden', !pend); $('#queueText').textContent = `${pend} processing`;
-    return pend;
-  } catch (e) { return 0; }
+    photoPend = (d.counts.queued || 0) + (d.counts.processing || 0);
+    setPill();
+    return photoPend;
+  } catch (e) { return photoPend; }
 }
-let pollT; async function poll() { clearTimeout(pollT); const pend = await loadGallery(); pollT = setTimeout(poll, pend ? 1500 : 15000); }
+let pollT; async function poll() { clearTimeout(pollT); const pend = await loadGallery(); const dpend = await loadDocs(); pollT = setTimeout(poll, (pend || dpend) ? 1500 : 15000); }
 
 /* ---------- viewer ---------- */
 let cur = null;
@@ -545,6 +552,90 @@ $('#cookieSave').onclick = async () => { const v = $('#cookieIn').value.trim(); 
 $('#cookieClear').onclick = async () => { if (!confirm('Remove the stored Instagram cookie?')) return; await api('/api/instagram/cookie', { method: 'DELETE' }); toast('Cookie removed'); loadIG(); };
 $('#igCheck').onclick = async () => { try { await api('/api/instagram/check', { method: 'POST' }); toast('Checking Instagram…'); setTimeout(loadIG, 600); }
   catch (e) { toast(e.message, 4000); loadIG(); } };
+
+/* ---------- docs (keyword redaction; not the face queue) ---------- */
+const DOC_EXT = /\.(pdf|jpe?g|png|webp|heic|heif|tiff?|bmp)$/i;
+let docSig = '', docItems = [];
+const kwIn = $('#kwIn');
+if (kwIn) {
+  kwIn.value = localStorage.getItem('fo.keywords') || '';
+  kwIn.addEventListener('input', () => localStorage.setItem('fo.keywords', kwIn.value.slice(0, 4000)));
+}
+function renderDocs() {
+  const el = $('#docList');
+  if (!el) return;
+  if (!docItems.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-ic">▤</div><div>No documents yet.</div><p class="hint">Add keywords, then a PDF or a photo of text.</p></div>';
+    return;
+  }
+  el.innerHTML = docItems.map(d => {
+    const ready = d.status === 'done';
+    const state = d.status === 'error' ? 'Failed' : ready ? `${d.hits} match${d.hits === 1 ? '' : 'es'}` : (d.progress ? `${Math.round(d.progress * 100)}%` : d.status);
+    const pages = d.pages ? ` · ${d.pages} page${d.pages === 1 ? '' : 's'}` : '';
+    const ocr = d.ocr_pages ? ` · OCR` : '';
+    const detail = d.error || d.note || (d.keywords || []).join(' · ');
+    return `<article class="dcard">
+      <div class="dprev">${ready ? `<img src="/api/docs/${d.id}/file/preview?v=${d.v}" alt="">` : `<div class="dph">${d.status === 'error' ? '⚠︎' : '…'}</div>`}</div>
+      <div class="dmeta">
+        <b title="${esc(d.name)}">${esc(d.name)}</b>
+        <div class="hint">${d.kind === 'pdf' ? 'PDF' : 'Image'} · ${esc(state)}${pages}${ocr}${ready && d.preview_page > 1 ? ` · preview p.${d.preview_page}` : ''}</div>
+        <div class="hint">${esc(detail)}</div>
+        <div class="dacts">
+          ${ready ? `<a class="btn small" href="/api/docs/${d.id}/file/download">Download</a>` : ''}
+          <button class="btn ghost small" type="button" data-del="${d.id}">Remove</button>
+        </div>
+      </div></article>`;
+  }).join('');
+}
+async function loadDocs() {
+  try {
+    const d = await api('/api/docs');
+    docItems = d.items || [];
+    docPend = (d.counts && ((d.counts.queued || 0) + (d.counts.processing || 0))) || 0;
+    setPill();
+    const ns = JSON.stringify(docItems.map(i => [i.id, i.status, i.v, i.hits, i.progress, i.note, i.error]));
+    if (ns !== docSig) { docSig = ns; renderDocs(); }
+    if (d.limits && $('#docHint')) {
+      const ocr = d.limits.ocr ? 'English OCR is on for scans and photos.' : 'OCR is off — only PDFs with selectable text can be searched.';
+      $('#docHint').textContent = `PDF or image. ${ocr} Up to ${d.limits.max_pages} PDF pages. Black boxes only — faces are not blurred here. A flattened copy goes to the same export folder as photos; the original stays put. OCR can miss handwriting, tiny type, and rotated or non-English text. Review the file.`;
+    }
+    return docPend;
+  } catch (e) { return docPend; }
+}
+function setDocStatus(t) { const el = $('#docStatus'); if (!el) return; el.textContent = t || ''; el.classList.toggle('hidden', !t); }
+async function takeDocs(files) {
+  const words = (kwIn && kwIn.value || '').trim();
+  if (!words) { toast('Add keywords first — one phrase per line'); return; }
+  const ok = (files || []).filter(f => f && f.size && DOC_EXT.test(f.name || ''));
+  if (!ok.length) { toast('Use a PDF or an image of text'); return; }
+  let done = 0, bad = 0;
+  for (const f of ok) {
+    setDocStatus(`Uploading ${done + 1}/${ok.length}…`);
+    const fd = new FormData();
+    fd.append('file', f, f.name);
+    fd.append('keywords', words);
+    try { await api('/api/docs', { method: 'POST', body: fd }); done++; }
+    catch (e) { bad++; toast(`${f.name}: ${e.message}`, 4000); }
+  }
+  setDocStatus(bad ? `${done} queued, ${bad} failed.` : `${done} queued. The original stays put.`);
+  toast(bad ? `${done} queued · ${bad} failed` : `${done} document${done === 1 ? '' : 's'} queued`);
+  loadDocs();
+  poll();
+}
+const docDrop = $('#docDrop'), docInput = $('#docInput');
+if (docDrop && docInput) {
+  ['dragenter', 'dragover'].forEach(ev => docDrop.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); docDrop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => docDrop.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); docDrop.classList.remove('over'); }));
+  docDrop.addEventListener('drop', e => takeDocs([...e.dataTransfer.files]));
+  docInput.onchange = () => { takeDocs([...docInput.files]); docInput.value = ''; };
+}
+$('#docList').addEventListener('click', async e => {
+  const b = e.target.closest('[data-del]');
+  if (!b) return;
+  if (!confirm('Remove this from Docs? The exported file is kept.')) return;
+  try { await api('/api/docs/' + b.dataset.del, { method: 'DELETE' }); toast('Removed. Export kept.'); loadDocs(); }
+  catch (err) { toast(err.message, 4000); }
+});
 
 /* ---------- boot ---------- */
 loadSettings().catch(() => {});

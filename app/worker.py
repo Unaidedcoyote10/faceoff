@@ -52,6 +52,31 @@ def export_dir_status() -> dict:
     return {"path": EXPORT_DIR, "label": os.environ.get("EXPORT_LABEL", ""), "writable": _dir_ok(EXPORT_DIR)}
 
 
+def export_bytes(created: float, orig_name: str, label: str, mode: str, ext: str, data: bytes) -> str | None:
+    """Write a finished file into the same export folder photos use. None when auto-export is off."""
+    settings = store.load_settings()
+    if not settings.get("auto_export", True):
+        return None
+    if not _dir_ok(EXPORT_DIR):
+        raise OSError("export folder is not writable")
+    ts = datetime.fromtimestamp(created)
+    orig = (orig_name or "document").replace("\\", "/")
+    stem = _slug(orig)
+    prefix = ""
+    dirs = [d for d in orig.split("/")[:-1] if d not in ("", ".", "..")]
+    if dirs and settings.get("export_folder_prefix", True):
+        prefix = "-".join(_slug(d, 24) for d in dirs[-2:]) + "_"
+    name = f"{ts:%Y%m%d-%H%M%S}_{label}_{prefix}{stem}_{mode}{ext}"
+    folder = os.path.join(EXPORT_DIR, f"{ts:%Y-%m}") if settings.get("export_subfolders", True) else EXPORT_DIR
+    path = os.path.join(folder, name)
+    i = 2
+    while os.path.exists(path):
+        path = os.path.join(folder, name[: -len(ext)] + f"_{i}{ext}")
+        i += 1
+    _atomic_write(path, data)
+    return path
+
+
 def ig_export_status() -> dict:
     return {"path": IG_EXPORT_DIR, "label": os.environ.get("IG_EXPORT_LABEL", ""), "enabled": IG_EXPORT_ENABLED,
             "writable": IG_EXPORT_ENABLED and _dir_ok(IG_EXPORT_DIR)}
