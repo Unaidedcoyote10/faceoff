@@ -38,7 +38,9 @@ def _process(id_: int):
         def prog(frac: float):
             store.doc_update(id_, progress=max(0.0, min(1.0, float(frac))))
 
-        result = keywords.redact_file(data, rec["name"], rec["keywords"], on_progress=prog)
+        result = keywords.redact_file(
+            data, rec["name"], rec["keywords"] or [], on_progress=prog, presets=rec.get("presets") or [],
+        )
         if not store.doc_get(id_):
             return
         paths = store.doc_paths(id_, rec["ext"], result.ext)
@@ -94,12 +96,14 @@ def resume():
         log.info("resumed %d document job(s)", len(ids))
 
 
-def add(data: bytes, name: str, phrases: list[str]) -> int:
+def add(data: bytes, name: str, phrases: list[str], presets: list[str] | None = None) -> int:
     kind = keywords.kind_for(name)
     ext = os.path.splitext(name)[1].lower()
     if ext == ".jpeg":
         ext = ".jpg"
-    id_ = store.doc_insert(name=name, kind=kind, ext=ext, status="queued", keywords=phrases)
+    id_ = store.doc_insert(
+        name=name, kind=kind, ext=ext, status="queued", keywords=phrases, presets=list(presets or []),
+    )
     worker._atomic_write(store.doc_paths(id_, ext)["original"], data)
     enqueue(id_)
     return id_

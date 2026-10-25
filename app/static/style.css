@@ -239,3 +239,11 @@ nav.bottom button{min-width:0}
 .dacts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .dacts .btn{text-decoration:none}
 #kwIn{margin-top:8px}
+.ticks-set{border:0;margin:0 0 4px;padding:0;min-inline-size:0}
+.ticks-set legend{padding:0}
+.ticks{display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0 2px}
+.tick{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;cursor:pointer;min-height:36px}
+.tick input{appearance:none;-webkit-appearance:none;width:18px;height:18px;margin:0;border:1.5px solid #6a6a84;border-radius:5px;background:#0f0f15;display:grid;place-items:center;flex:none}
+.tick input:checked{background:var(--grad);border-color:transparent}
+.tick input:checked:after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);margin-top:-2px}
+.tick input:focus-visible{outline:2px solid #c4b5fd;outline-offset:2px}

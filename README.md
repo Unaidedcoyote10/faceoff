@@ -4,7 +4,7 @@
 
 **Faceoff** is a self-hosted, mobile-first web app that hides faces in photos. Each face can be blurred with a tight, feathered oval or covered with a solid black box. The rest of the image is kept. Every processed photo is written automatically to an export folder of your choice.
 
-The same app also has a **Docs** tool that blacks out keywords and phrases in PDFs and in photos of text. Face detection and keyword redaction are separate tools: Docs does not look for faces, and the photo Blur/Box flow does not search for words.
+The same app also has a **Docs** tool that blacks out keywords, phrases, and common personal details (names, money, addresses, emails, phone numbers, locations) in PDFs and in photos of text. Face detection and document redaction are separate tools: Docs does not look for faces, and the photo Blur/Box flow does not search for words.
 
 Creators building AI or art reference libraries use it to collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into a library or export folder. Built for reference workflows — pull saves, redact faces, drop clean refs into your library.
 
@@ -36,14 +36,14 @@ Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a 
 ## Use cases
 
 - **AI and art reference libraries.** Collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into your library or export folder. Saved videos stay raw and are not redacted.
-- **Keyword redaction.** Black out names, account numbers, or other phrases in a PDF or a photo of a page, then export the flattened copy beside your other files. This does not replace face blur.
+- **Document redaction.** Black out phrases you type, or tick presets for names, money, addresses, emails, phone numbers, and locations, in a PDF or a photo of a page. The flattened copy exports beside your other files. This does not replace face blur. Presets are patterns and short lists, not a full reading of the page.
 
 The same blur-or-box export is what the app does for any photo you process. Originals stay in the private data folder; only the redacted copies are written to the export folder.
 
 ## Features
 
 - **Blur or Box.** Choose per upload or per selection, and redo an item in the other mode later. Blur strength, padding (0–30%) and detection sensitivity (Low/Medium/High) are adjustable in Settings.
-- **Docs (keyword redaction).** A separate tab. Upload a PDF or an image of text, list keywords or phrases, and Faceoff covers each match with a solid black box. Originals stay in the private data folder. The redacted copy is written to the same export folder as photos. See [Keyword redaction](#keyword-redaction-docs) for formats and limits.
+- **Docs (keyword and preset redaction).** A separate tab. Tick presets (names, money, addresses, emails, phone numbers, locations) and, if you want, type extra phrases. Faceoff covers each match with a solid black box. Originals stay in the private data folder. The redacted copy is written to the same export folder as photos. See [Keyword redaction](#keyword-redaction-docs) for formats and accuracy limits.
 - **Accurate face detection.** Uses OpenCV's **YuNet** detector in several passes: a downscaled pass for close-ups, a mid-resolution pass, and high-resolution tiles for small faces in crowds. Boxes are mapped back to full resolution, and low-confidence large hits are checked again to cut down pet and object false positives. EXIF orientation is applied, and EXIF/GPS metadata is stripped from the output.
 - **Bulk upload.** Pick many photos on a phone, or drag and drop files or whole folders (subfolders included) on desktop. Non-images and system files are skipped. Uploads are chunked with automatic retry, and a background queue processes them (2 workers by default).
 - **Auto-export.** Every processed photo is written to the export folder you mount. Names look like `20261023-173901_upload_IMG_1234_blur.jpg`, with optional `YYYY-MM/` sub-folders and an optional source-folder prefix. Writes are atomic, with configurable permissions and owner (`PUID`/`PGID`, `UMASK`). This works well with a network share.
@@ -180,7 +180,7 @@ Use it at your own risk. Automated access may be against Instagram's terms; the 
 ## Using Faceoff
 
 - **Upload tab:** pick photos or a folder, choose Blur or Box, and watch the queue. Results land in the Gallery and the export folder. This tab is photos only.
-- **Docs tab:** black out keywords in a PDF or a photo of text. This does not blur faces. See below.
+- **Docs tab:** tick personal-detail presets and/or type keywords, then black them out in a PDF or a photo of text. This does not blur faces. See below.
 - **Gallery:** tap to flip before/after, use ⤢ for the viewer and slider, ⬇ to save to the device, or *Redo as box/blur*.
 - **Saved tab:** browse Instagram saves by post or by account. *Select* items, then Blur / Box (photos), Save, or Delete. *▶ Watch as feed* opens the video feed.
 - **Settings:**
@@ -196,6 +196,25 @@ An older mode lets the server poll your Instagram saves with a pasted session co
 ## Keyword redaction (Docs)
 
 Docs is a second tool in the same app. It does not run face detection, and the photo Blur/Box settings (padding, sensitivity, blur strength) do not apply to it. Instagram sync is unchanged: the extension notes above still apply to the Saved library, and Docs never talks to Instagram.
+
+### Presets and custom lines
+
+The Docs tab has six tick boxes and a text box. Whatever you tick and whatever you type are combined for that file. Leave both empty and the upload is rejected. Either one is enough.
+
+Custom lines are still whole words and phrases, one per line, case-insensitive, up to 40 lines of 80 characters. `cat` does not match `category`. A phrase split by a line break is often missed.
+
+Presets do not use a large language model. Emails, phone numbers, and money are regular expressions. Names, addresses, and locations are short rules plus a fixed word list. That keeps the container small enough for a Pi, and it means the presets are wrong sometimes. Review every page.
+
+| Preset | What it tries to cover | What it misses, and what it may cover by mistake |
+|---|---|---|
+| **Names** | A title plus a name (`Dr. Jane Smith`, `Mr John Smith`), a labeled field (`Name: Ada Lovelace`, `Patient: Dr. Jane Smith`), or a common given name plus a capitalized surname (`Jane Smith`, `Maria de la Cruz`). | Unusual names, a single name with no title or label, all-lowercase text, and a name split across two lines. A title plus an ordinary capitalized word is covered on purpose of the rule (`Dr. Pepper`). There is no census and no neural name model. |
+| **Money** | `$1,234.56`, `€99`, `£50`, `EUR 50`, `USD 1,200`, `50 dollars`, `($1,234.56)`. | An amount with no currency symbol or word. `1.234,56 €` (dot as the thousands separator, comma as the decimal) is often missed. |
+| **Addresses** | A US-style street line (`742 Evergreen Terrace`, `10 N. Main St.`), a PO Box, and a `City, ST 12345` line. | A street with no suffix (`123 Main`), most addresses outside the US, and a street on one line with the city on the next. Each line is judged on its own. |
+| **Emails** | `jane@example.com`, including a space around `@` that OCR sometimes inserts. | `name at domain dot com`. An address that OCR splits into pieces it cannot rejoin. |
+| **Phone numbers** | US numbers that already have separators (`(415) 555-2671`, `415-555-2671`, `415 555 2671`) and international numbers that start with `+` (`+44 20 7946 0958`). | A bare run of digits. Those are left alone on purpose so an account number is not treated as a phone. A local number with no area code (`555-2671`) is missed. |
+| **Locations** | A fixed list of countries, US states (full names), Canadian provinces, and major cities (`Chicago`, `New York`, `London`), plus a `City, ST ZIP` line. `Chicago, IL` is covered because Chicago is on the list. | Small towns, most places that are not on the list (`Springfield, IL` with no ZIP), lowercase text, and two-letter abbreviations sitting on their own. `or` and `IN` are not treated as places. A few country names that are also personal names are omitted (Jordan, Chad, Israel, Turkey). Names that are also places can be covered (`Georgia`, `Sydney`). |
+
+The result note counts presets by category (`Emails ×1`). It does not repeat the address or number that was found.
 
 ### What you can upload
 
@@ -219,7 +238,8 @@ A page that already has selectable text is not also OCR'd. Words that exist only
 This is a practical first cut for a Pi-friendly app, not a certified or forensic redaction tool. Review every output.
 
 - **OCR is imperfect.** Tesseract's English model misses handwriting, rotated or skewed pages, tiny type, stylized fonts, and text that is not English. A match it misses stays visible.
-- **Phrases should sit on one line.** A phrase split across a line break is often missed. `cat` does not match `category` (whole words only). The black box is padded so glyph edges do not peek out, which can also cover a very short word sitting right against a match.
+- **Phrases and preset matches should sit on one line.** A phrase split across a line break is often missed. `cat` does not match `category` (whole words only). The black box is padded so glyph edges do not peek out, which can also cover a very short word sitting right against a match.
+- **Presets are not a complete PII pass.** See the table above. Names, addresses, and locations in particular will miss real details and will sometimes black out an ordinary word. Emails, phones, and money only match the patterns in that table.
 - **Page cap.** PDFs longer than `DOC_MAX_PAGES` (40 by default) are rejected so a small machine can finish the job. One document is processed at a time. Render size is capped (`DOC_DPI`, `DOC_OCR_MAX_SIDE`) so memory stays modest. There is no large neural OCR model.
 - **Password-protected PDFs** are rejected.
 - **Not a full sanitizer.** Flattening removes the text layer of the pages we rewrite, but this does not promise that every hidden copy of a word is gone (for example, text OCR failed to see). Do not treat it as legally sufficient redaction.
@@ -229,7 +249,7 @@ This is a practical first cut for a Pi-friendly app, not a certified or forensic
 ### Manual check
 
 1. Open **Docs**. Confirm Upload still offers only Blur / Box for photos.
-2. Enter a keyword that appears in a text PDF, upload it, and wait until the card shows a match count.
+2. Enter a keyword that appears in a text PDF, and tick one preset (for example Emails) if the file also has an address you did not type. Upload it, and wait until the card shows a match count. The note should list preset totals without quoting the address back at you.
 3. Download the PDF and try to select text: the covered word should be a black bar, and the original file on disk should be unchanged.
 4. Confirm a new `*_doc_*_redact.pdf` appeared in the export folder, and that the Gallery did not gain the document.
 5. Optional: photograph a printed line, or upload a scan, and expect OCR to miss some words.
@@ -283,7 +303,7 @@ All endpoints are under the same origin as the UI. If `APP_PASSWORD` is set, eve
 |---|---|
 | Health | `GET /api/health` |
 | Upload and gallery | `POST /api/upload` (multipart), `GET /api/images`, `GET /api/images/{id}`, `GET /api/images/{id}/file/{thumb-before\|thumb-after\|before\|after\|full}`, `POST /api/images/{id}/reprocess`, `DELETE /api/images/{id}` |
-| Docs (keywords) | `POST /api/docs` (multipart: `file` + `keywords`, one phrase per line), `GET /api/docs`, `GET /api/docs/{id}`, `GET /api/docs/{id}/file/{preview\|download}`, `DELETE /api/docs/{id}` |
+| Docs (keywords and presets) | `POST /api/docs` (multipart: `file`, `keywords` one phrase per line, `presets` comma-separated: `names,money,addresses,emails,phones,locations`), `GET /api/docs`, `GET /api/docs/{id}`, `GET /api/docs/{id}/file/{preview\|download}`, `DELETE /api/docs/{id}` |
 | Settings | `GET /api/settings`, `POST /api/settings` |
 | Saved library | `GET /api/saved` (filter, sort, kind, owner, paging), `GET /api/saved/owners`, `GET /api/saved/ids`, `GET /api/saved/batch?ids=`, `GET /api/saved/{id}`, `GET /api/saved/{id}/file/{thumb\|original\|download}` (Range supported), `POST /api/saved/process`, `POST /api/saved/delete` |
 | Extension (token) | `GET /api/ext/control` (pause flag and pacing limits), `POST /api/ext/report` (warning → server pause), `GET /api/ext/ping`, `POST /api/ingest/known`, `POST /api/ingest` (multipart: `meta` JSON + `file`) |
@@ -309,7 +329,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 | Test | What it checks | How to run |
 |---|---|---|
 | `tests/ingest_test.py` | Pairing and token auth, CORS, the pause flag (423 while paused, auto-pause on report), ingest → Saved, dedupe, raw IG export layout, thumbnails, Range/416, download attachment headers, processing → export folder, gallery integration and pruning | `DATA_DIR=/tmp/fo EXPORT_DIR=/tmp/fo/x IG_EXPORT_ENABLED=1 IG_EXPORT_DIR=/tmp/fo/ig GALLERY_LIMIT=3 python -m tests.ingest_test` |
-| `tests/docs_redact_test.py` | Keyword parsing, whole-word PDF redaction (text layer removed, kept words still visible), scanned-page OCR when Tesseract is installed, export filename, original bytes untouched, Docs kept out of the photo gallery | `python -m tests.docs_redact_test` |
+| `tests/docs_redact_test.py` | Keyword parsing, preset detection (email, phone, money, address, name, location) and its known misses, whole-word PDF redaction (text layer removed, kept words still visible), presets combined with a custom line, scanned-page OCR when Tesseract is installed, export filename, original bytes untouched, Docs kept out of the photo gallery | `python -m tests.docs_redact_test` |
 | `tests/ext/e2e_extension.py` + `tests/ext/mock_ig.py` | Loads the unpacked extension in Chromium against a local HTTPS mock of instagram.com and its CDN. Covers zero requests while paused, baseline, the 3–6 h schedule, backfill gated by the server, a single paced page, and a 429 triggering a 48 h stop plus server auto-pause. | start Faceoff on `127.0.0.1:8088`, run `python3 tests/ext/mock_ig.py`, then `python3 tests/ext/e2e_extension.py` (needs Playwright + Chromium; the mock creates its own throwaway TLS cert) |
 | `tests/ig_mock_test.py` | Legacy server pull against a mock | `docker exec faceoff python /app/tests/ig_mock_test.py` |
 | `tests/*_shots.py` | Phone-width UI checks with Playwright (feed, by-user, save, logo, folder drop) against a running instance with some data | `python3 tests/save_shots.py http://localhost:8088 /tmp/shots` |
@@ -317,7 +337,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 ## Project layout
 
 ```
-app/            FastAPI app (main.py), face redaction (redact.py), keyword redaction (keywords.py, docwork.py),
+app/            FastAPI app (main.py), face redaction (redact.py), document redaction (keywords.py, presets.py, docwork.py),
                 queue (worker.py), SQLite store (store.py), Saved library (saved.py), legacy IG pull (instagram.py), static UI (static/)
 extension/      Faceoff Sync MV3 extension (background.js, content.js, popup, options, icons)
 scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip)
@@ -330,5 +350,5 @@ Dockerfile, docker-compose.yml, .env.example
 
 - Faceoff is released under the [MIT License](LICENSE).
 - Face detection uses **YuNet** from the [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) (MIT License). The model is downloaded at build time and not stored in this repository.
-- Keyword redaction uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) / PDFium (Apache-2.0 or BSD-3-Clause) and, for scans and photos, [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (Apache-2.0) via pytesseract. English trained data is installed in the image. No extra model download.
+- Document redaction uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) / PDFium (Apache-2.0 or BSD-3-Clause) and, for scans and photos, [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (Apache-2.0) via pytesseract. English trained data is installed in the image. Presets are regular expressions and a fixed word list shipped in `app/presets.py`. No extra model download.
 - Test images (`tests/samples/`) are public-domain historical photographs from Wikimedia Commons: Albert Einstein (1921), Abraham Lincoln (1863), and the 1927 Solvay Conference. `tests/video/clip4s_small.mp4` is a synthetic test pattern.

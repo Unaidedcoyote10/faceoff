@@ -103,6 +103,7 @@ def init_db():
             out_ext TEXT,
             status TEXT NOT NULL,
             keywords TEXT NOT NULL,
+            presets TEXT,
             pages INTEGER DEFAULT 0,
             hits INTEGER DEFAULT 0,
             hit_detail TEXT,
@@ -116,6 +117,9 @@ def init_db():
             processed_at REAL
         )""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_docs_created ON documents(created)")
+        doc_cols = {r[1] for r in c.execute("PRAGMA table_info(documents)")}
+        if "presets" not in doc_cols:
+            c.execute("ALTER TABLE documents ADD COLUMN presets TEXT")
         # recover jobs interrupted by a restart
         c.execute("UPDATE images SET status='queued' WHERE status='processing'")
         c.execute("UPDATE documents SET status='queued' WHERE status='processing'")
@@ -425,15 +429,26 @@ def _doc_row(r):
     except (TypeError, ValueError):
         d["keywords"] = []
     try:
+        d["presets"] = json.loads(d["presets"]) if d.get("presets") else []
+    except (TypeError, ValueError):
+        d["presets"] = []
+    if not isinstance(d["presets"], list):
+        d["presets"] = []
+    try:
         d["hit_detail"] = json.loads(d["hit_detail"]) if d.get("hit_detail") else {}
     except (TypeError, ValueError):
         d["hit_detail"] = {}
     return d
 
 
+def _dump_doc_json(kw: dict):
+    for key in ("keywords", "presets", "hit_detail"):
+        if key in kw and not isinstance(kw[key], str):
+            kw[key] = json.dumps(kw[key])
+
+
 def doc_insert(**kw) -> int:
-    if "keywords" in kw and not isinstance(kw["keywords"], str):
-        kw["keywords"] = json.dumps(kw["keywords"])
+    _dump_doc_json(kw)
     kw.setdefault("created", time.time())
     kw.setdefault("status", "queued")
     with _lock, conn() as c:
@@ -444,10 +459,7 @@ def doc_insert(**kw) -> int:
 def doc_update(id_: int, **kw):
     if not kw:
         return
-    if "keywords" in kw and not isinstance(kw["keywords"], str):
-        kw["keywords"] = json.dumps(kw["keywords"])
-    if "hit_detail" in kw and not isinstance(kw["hit_detail"], str):
-        kw["hit_detail"] = json.dumps(kw["hit_detail"])
+    _dump_doc_json(kw)
     with _lock, conn() as c:
         c.execute(f"UPDATE documents SET {','.join(k + '=?' for k in kw)} WHERE id=?", [*kw.values(), id_])
 
