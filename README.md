@@ -8,7 +8,7 @@ The same app also has a **Docs** tool that blacks out keywords, phrases, and com
 
 Creators building AI or art reference libraries use it to collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into a library or export folder. Built for reference workflows — pull saves, redact faces, drop clean refs into your library.
 
-An optional browser extension, **Faceoff Sync**, copies the posts you save on Instagram into Faceoff's **Saved** library, so you can pick which ones to redact. The extension runs in your own logged-in browser; the Faceoff server never talks to Instagram and never sees your Instagram cookies. Photos can be redacted; videos stay raw. Automated access may be against Instagram's terms — use the extension at your own risk, or skip it. Faceoff works without it.
+Instagram sync is **extension-only**. The optional browser extension, **Faceoff Sync**, copies the posts you save on Instagram into Faceoff's **Saved** library, so you can pick which ones to redact. The extension runs in your own logged-in browser. The Faceoff server never talks to Instagram and never accepts a session cookie or sessionid. Photos can be redacted; videos stay raw. Automated access may be against Instagram's terms — use the extension at your own risk, or skip it. Faceoff works without it.
 
 Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a Raspberry Pi 4/5 (arm64) and on any x86-64 machine. The UI is plain HTML/CSS/JS, with no front-end build step.
 
@@ -129,7 +129,6 @@ Paths containing spaces are fine; quote them in `.env` (`EXPORT_HOST_DIR="/srv/p
 | `IG_EXPORT_ENABLED` | `0` | `1` copies raw Instagram saves to `/export-ig`. |
 | `IG_EXPORT_HOST_DIR` | `./export-ig` | Host folder mounted at `/export-ig`. |
 | `IG_EXPORT_LABEL` | *(empty)* | How the IG folder is described in the UI. Display only. |
-| `IG_MIN_INTERVAL_HOURS` | `2` | Minimum schedule interval for the legacy server-side pull (off by default). |
 
 Advanced variables can be set in the `environment:` section of `docker-compose.yml`; they have sensible defaults in the image.
 
@@ -180,18 +179,17 @@ Use it at your own risk. Automated access may be against Instagram's terms; the 
 ## Using Faceoff
 
 - **Upload tab:** pick photos or a folder, choose Blur or Box, and watch the queue. Results land in the Gallery and the export folder. This tab is photos only.
-- **Docs tab:** tick personal-detail presets and/or type keywords, then black them out in a PDF or a photo of text. This does not blur faces. See below.
+- **Docs tab:** tick the presets (names, money, addresses, emails, phone numbers, locations) and, if you want, add custom keyword lines (one phrase per line). Faceoff blacks those out in a PDF or a photo of text. This does not blur faces. See below.
 - **Gallery:** tap to flip before/after, use ⤢ for the viewer and slider, ⬇ to save to the device, or *Redo as box/blur*.
 - **Saved tab:** browse Instagram saves by post or by account. *Select* items, then Blur / Box (photos), Save, or Delete. *▶ Watch as feed* opens the video feed.
 - **Settings:**
   - redaction defaults and export options;
-  - extension pairing, pause/resume, and backfill toggle;
-  - an optional raw IG copy;
-  - the legacy server pull (off by default; see below).
+  - extension pairing, pause/resume, and backfill toggle (Instagram sync is extension-only);
+  - an optional raw IG copy.
 
-### Legacy server-side pull (off by default)
+### Instagram sync is extension-only
 
-An older mode lets the server poll your Instagram saves with a pasted session cookie. The cookie is stored only in `/data` (mode 600) and masked in the UI and API. This mode is **disabled by default** and not recommended; the extension is the supported path.
+Saved posts reach Faceoff only through **Faceoff Sync**. There is no cookie paste and no server-side Instagram login: the server never accepts a session cookie or sessionid. Generate a pairing token under **Settings → Browser extension**, install the extension, and press **Resume** when you are ready. The Saved library is unchanged. On startup, Faceoff deletes a leftover `ig_cookie.json` in the data folder if one is still there from an older version. It does not read that file.
 
 ## Keyword redaction (Docs)
 
@@ -308,13 +306,12 @@ All endpoints are under the same origin as the UI. If `APP_PASSWORD` is set, eve
 | Saved library | `GET /api/saved` (filter, sort, kind, owner, paging), `GET /api/saved/owners`, `GET /api/saved/ids`, `GET /api/saved/batch?ids=`, `GET /api/saved/{id}`, `GET /api/saved/{id}/file/{thumb\|original\|download}` (Range supported), `POST /api/saved/process`, `POST /api/saved/delete` |
 | Extension (token) | `GET /api/ext/control` (pause flag and pacing limits), `POST /api/ext/report` (warning → server pause), `GET /api/ext/ping`, `POST /api/ingest/known`, `POST /api/ingest` (multipart: `meta` JSON + `file`) |
 | Extension admin (UI) | `POST /api/ext/token` (rotate), `DELETE /api/ext/token` (revoke), `POST /api/ext/pause`, `GET /api/ext/download` |
-| Legacy pull | `GET /api/instagram`, `POST`/`DELETE /api/instagram/cookie`, `POST /api/instagram/check` |
 
 While sync is paused, `POST /api/ingest` and `/api/ingest/known` return `423 Locked`.
 
 ## Security and privacy notes
 
-- **No Instagram credentials on the server** (extension mode). The extension never reads or sends cookies; it uses the logged-in tab's own same-origin requests. Media goes from Instagram's CDN to your browser to your Faceoff server, and nowhere else.
+- **Extension-only Instagram sync.** The server never contacts Instagram and never accepts a session cookie or sessionid. The extension never reads or sends cookies; it uses the logged-in tab's own same-origin requests. Media goes from Instagram's CDN to your browser to your Faceoff server, and nowhere else.
 - **Pairing token.** A random token authorizes the extension and is stored server-side in `/data`. Rotate or revoke it in Settings; revoking it instantly cuts the extension off.
 - **Server-side pause flag.** One switch in Settings stops all extension activity before its next request. Warnings reported by the extension flip it automatically. New installs start paused.
 - **Metadata.** Exported photos have EXIF/GPS stripped. Originals stay in `/data`, so treat that folder as private.
@@ -331,14 +328,13 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 | `tests/ingest_test.py` | Pairing and token auth, CORS, the pause flag (423 while paused, auto-pause on report), ingest → Saved, dedupe, raw IG export layout, thumbnails, Range/416, download attachment headers, processing → export folder, gallery integration and pruning | `DATA_DIR=/tmp/fo EXPORT_DIR=/tmp/fo/x IG_EXPORT_ENABLED=1 IG_EXPORT_DIR=/tmp/fo/ig GALLERY_LIMIT=3 python -m tests.ingest_test` |
 | `tests/docs_redact_test.py` | Keyword parsing, preset detection (email, phone, money, address, name, location) and its known misses, whole-word PDF redaction (text layer removed, kept words still visible), presets combined with a custom line, scanned-page OCR when Tesseract is installed, export filename, original bytes untouched, Docs kept out of the photo gallery | `python -m tests.docs_redact_test` |
 | `tests/ext/e2e_extension.py` + `tests/ext/mock_ig.py` | Loads the unpacked extension in Chromium against a local HTTPS mock of instagram.com and its CDN. Covers zero requests while paused, baseline, the 3–6 h schedule, backfill gated by the server, a single paced page, and a 429 triggering a 48 h stop plus server auto-pause. | start Faceoff on `127.0.0.1:8088`, run `python3 tests/ext/mock_ig.py`, then `python3 tests/ext/e2e_extension.py` (needs Playwright + Chromium; the mock creates its own throwaway TLS cert) |
-| `tests/ig_mock_test.py` | Legacy server pull against a mock | `docker exec faceoff python /app/tests/ig_mock_test.py` |
 | `tests/*_shots.py` | Phone-width UI checks with Playwright (feed, by-user, save, logo, folder drop) against a running instance with some data | `python3 tests/save_shots.py http://localhost:8088 /tmp/shots` |
 
 ## Project layout
 
 ```
 app/            FastAPI app (main.py), face redaction (redact.py), document redaction (keywords.py, presets.py, docwork.py),
-                queue (worker.py), SQLite store (store.py), Saved library (saved.py), legacy IG pull (instagram.py), static UI (static/)
+                queue (worker.py), SQLite store (store.py), Saved library (saved.py), static UI (static/)
 extension/      Faceoff Sync MV3 extension (background.js, content.js, popup, options, icons)
 scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip)
 tools/          logo geometry + icon generator

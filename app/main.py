@@ -8,7 +8,6 @@ import zipfile
 import logging
 import os
 import secrets
-import threading
 import time
 
 from starlette.concurrency import run_in_threadpool
@@ -16,7 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import docwork, instagram, keywords, redact, saved, store, worker
+from . import docwork, keywords, redact, saved, store, worker
 
 APP_NAME = "Faceoff"
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -28,7 +27,6 @@ MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "40"))
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 
 app = FastAPI(title=APP_NAME, docs_url=None, redoc_url=None)
-_stop = threading.Event()
 
 OPEN_PATHS = ("/api/health", "/manifest.webmanifest", "/icons/", "/favicon.ico",
               "/api/ingest", "/api/ext/ping", "/api/ext/control", "/api/ext/report")  # extension endpoints use the pairing token instead
@@ -63,22 +61,26 @@ async def basic_auth(request: Request, call_next):
     return resp
 
 
+def _drop_legacy_ig_cookie():
+    """Instagram sync is extension-only. Remove a leftover session-cookie file without reading it."""
+    for name in ("ig_cookie.json", "ig_cookie.json.tmp"):
+        path = os.path.join(store.DATA_DIR, name)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            continue
+        log.info("removed leftover Instagram cookie file %s", name)
+
+
 @app.on_event("startup")
 def startup():
     store.init_db()
-    st = instagram.load_state()
-    if st.get("status") == "running":
-        instagram._set(status="pending", message="Restarted during a check; will retry on schedule.")
+    _drop_legacy_ig_cookie()
+    store.save_settings({})  # rewrite settings so retired server-pull keys are dropped
     worker.resume()
     docwork.resume()
-    threading.Thread(target=instagram.scheduler_loop, args=(_stop,), daemon=True, name="ig-scheduler").start()
     log.info("%s ready. data=%s export=%s workers=%s auth=%s ocr=%s", APP_NAME, store.DATA_DIR, worker.EXPORT_DIR,
              worker.WORKERS, "on" if APP_PASSWORD else "off", "on" if keywords.ocr_available() else "off")
-
-
-@app.on_event("shutdown")
-def shutdown():
-    _stop.set()
 
 
 def _pub(r: dict) -> dict:
@@ -218,36 +220,6 @@ async def post_settings(request: Request):
     return {"settings": s}
 
 
-@app.get("/api/instagram")
-def ig_status():
-    return instagram.public_status()
-
-
-@app.post("/api/instagram/cookie")
-async def ig_cookie(request: Request):
-    body = await request.json()
-    try:
-        c = instagram.save_cookie(body.get("cookie", ""))
-    except (ValueError, TypeError) as e:
-        raise HTTPException(400, f"Couldn't read that cookie: {e}")
-    log.info("instagram cookie updated (%d fields)", len(c))
-    return instagram.public_status()
-
-
-@app.delete("/api/instagram/cookie")
-def ig_cookie_delete():
-    instagram.clear_cookie()
-    return instagram.public_status()
-
-
-@app.post("/api/instagram/check")
-def ig_check():
-    ok, info = instagram.check_now()
-    if not ok:
-        return JSONResponse(info, status_code=429 if "allowed_at" in info else 400)
-    return info
-
-
 # ---------------------------------------------------------------- browser extension ("Faceoff Sync")
 def _ext_auth(request: Request):
     tok = store.load_settings().get("ext_token") or ""
@@ -318,7 +290,7 @@ async def ext_pause(request: Request):
 def ext_ping(request: Request):
     _ext_auth(request)
     s = store.load_settings()
-    return {"ok": True, "app": APP_NAME, "mode": s["ig_mode"] or s["default_mode"], "ig_export": worker.ig_export_status(),
+    return {"ok": True, "app": APP_NAME, "mode": s["default_mode"], "ig_export": worker.ig_export_status(),
             **store.ingest_stats()}
 
 

@@ -28,7 +28,7 @@ function go(tab) {
   $$('nav.bottom button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   history.replaceState(null, '', '#' + tab);
   if (tab === 'gallery') loadGallery();
-  if (tab === 'settings') { loadSettings(); loadIG(); }
+  if (tab === 'settings') loadSettings();
   if (tab === 'docs') loadDocs();
   if (tab === 'saved') savedOpen(); else savedLeave();
   window.scrollTo({ top: 0 });
@@ -488,12 +488,6 @@ async function loadSettings() {
   $('#setExport').checked = S.auto_export; $('#setExport').onchange = e => save({ auto_export: e.target.checked });
   $('#setPrefix').checked = S.export_folder_prefix; $('#setPrefix').onchange = e => save({ export_folder_prefix: e.target.checked });
   $('#setSub').checked = S.export_subfolders; $('#setSub').onchange = e => save({ export_subfolders: e.target.checked });
-  $('#igEnabled').checked = S.ig_enabled; $('#igEnabled').onchange = e => { save({ ig_enabled: e.target.checked }); setTimeout(loadIG, 800); };
-  const setSel = (el, v, k, num) => { if (![...el.options].some(o => o.value == v)) el.add(new Option(v, v)); el.value = v; el.onchange = () => save({ [k]: num ? +el.value : el.value }); };
-  setSel($('#igInterval'), S.ig_interval_hours, 'ig_interval_hours', true);
-  setSel($('#igCap'), S.ig_per_run_cap, 'ig_per_run_cap', true);
-  setSel($('#igFirst'), S.ig_first_run, 'ig_first_run');
-  setSel($('#igMode'), S.ig_mode, 'ig_mode');
 }
 function renderExt(x) {
   const p = $('#extPause');
@@ -519,39 +513,6 @@ $('#extGen').onclick = async () => {
 };
 $('#extCopy').onclick = async () => { const t = $('#extTok'); t.select();
   try { await navigator.clipboard.writeText(t.value); toast('Copied'); } catch (_) { document.execCommand('copy'); toast('Copied'); } };
-const IGL = { ok: ['Connected', 'ok'], running: ['Checking…', 'warn'], pending: ['Pending check', 'warn'], paused: ['Paused', ''],
-  no_cookie: ['Not connected', ''], cookie_expired: ['Cookie expired', 'bad'], rate_limited: ['Backing off', 'warn'], challenge: ['Security check', 'bad'], error: ['Error', 'bad'] };
-let igT;
-async function loadIG() {
-  clearTimeout(igT);
-  let s; try { s = await api('/api/instagram'); } catch (e) { return; }
-  const [label, cls] = IGL[s.status] || [s.status, ''];
-  const p = $('#igPill'); p.textContent = label; p.className = 'status ' + cls;
-  const msgs = { no_cookie: 'Paste your Instagram session cookie below to pull newly saved posts automatically.',
-    cookie_expired: 'Your Instagram session expired or was rejected. Log into instagram.com again and paste a fresh sessionid.' };
-  $('#igMsg').textContent = s.message || msgs[s.status] || '';
-  if (s.status === 'cookie_expired') $('#igMsg').textContent = (s.message || '') + (s.message && s.message.includes('fresh') ? '' : ' ' + msgs.cookie_expired);
-  $('#igMsg').style.color = cls === 'bad' ? 'var(--bad)' : '';
-  const kv = [['Account', s.username ? '@' + s.username : '—'], ['Cookie', s.cookie ? `sessionid ${s.cookie.sessionid}` : 'none'],
-    ['Last check', ago(s.last_run)], ['Next check', s.next_run ? ago(s.next_run) : (s.enabled ? '—' : 'off')], ['Pulled so far', s.total_pulled]];
-  if (s.cookie_fields && s.cookie_fields.length) kv.splice(2, 0, ['Cookie fields', s.cookie_fields.length < 3 ? `${s.cookie_fields.join(', ')} <span style="color:var(--warn)">(full header recommended)</span>` : s.cookie_fields.length + ' fields']);
-  if (s.rate_limited_until && s.status === 'rate_limited') kv.push(['Back-off until', ago(s.rate_limited_until)]);
-  const lr = s.last_response; if (lr && lr.status && lr.status >= 300) kv.push(['Last IG reply', `${lr.endpoint} → HTTP ${lr.status}${lr.message ? ' · ' + String(lr.message).replace(/</g, '&lt;').slice(0, 60) : ''}`]);
-  $('#igKv').innerHTML = kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
-  $('#igFloor').textContent = s.min_interval_hours;
-  $('#cookieSum').textContent = s.cookie ? 'Replace session cookie' : 'Paste session cookie';
-  if (!s.cookie || s.status === 'cookie_expired') $('#cookieBox').open = true;
-  const btn = $('#igCheck');
-  btn.disabled = !s.cookie || s.status === 'running' || !!s.check_now_allowed_at;
-  btn.textContent = s.status === 'running' ? 'Checking…' : s.check_now_allowed_at ? `Check now (available ${ago(s.check_now_allowed_at)})` : 'Check now';
-  if ($('#tab-settings').classList.contains('active')) igT = setTimeout(loadIG, s.status === 'running' || s.status === 'pending' ? 3000 : 20000);
-}
-$('#cookieSave').onclick = async () => { const v = $('#cookieIn').value.trim(); if (!v) return toast('Paste a cookie first');
-  try { await api('/api/instagram/cookie', { method: 'POST', body: JSON.stringify({ cookie: v }) }); $('#cookieIn').value = '';
-    $('#cookieBox').open = false; toast('Cookie saved securely on the server'); loadIG(); } catch (e) { toast(e.message, 4000); } };
-$('#cookieClear').onclick = async () => { if (!confirm('Remove the stored Instagram cookie?')) return; await api('/api/instagram/cookie', { method: 'DELETE' }); toast('Cookie removed'); loadIG(); };
-$('#igCheck').onclick = async () => { try { await api('/api/instagram/check', { method: 'POST' }); toast('Checking Instagram…'); setTimeout(loadIG, 600); }
-  catch (e) { toast(e.message, 4000); loadIG(); } };
 
 /* ---------- docs (keyword redaction; not the face queue) ---------- */
 const DOC_EXT = /\.(pdf|jpe?g|png|webp|heic|heif|tiff?|bmp)$/i;

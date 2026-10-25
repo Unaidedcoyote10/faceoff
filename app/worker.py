@@ -18,6 +18,7 @@ IG_EXPORT_DIR = os.environ.get("IG_EXPORT_DIR", "/export-ig")
 IG_EXPORT_ENABLED = os.environ.get("IG_EXPORT_ENABLED", "0") in ("1", "true", "yes")
 FILE_MODE = int(os.environ.get("EXPORT_FILE_MODE", "664"), 8)
 os.umask(int(os.environ.get("UMASK", "002"), 8))
+# "instagram" is historical: items pulled before sync became extension-only.
 IG_SOURCES = ("instagram", "extension")
 
 
@@ -84,7 +85,7 @@ def ig_export_status() -> dict:
 
 def _target_dir(rec: dict, settings: dict) -> str | None:
     if rec["source"] in IG_SOURCES:
-        # legacy server-pull items: own IG folder or not exported at all
+        # Instagram-sourced items: own IG folder, or not exported at all
         if not (IG_EXPORT_ENABLED and settings.get("ig_export", True)):
             return None
         return IG_EXPORT_DIR
