@@ -30,9 +30,11 @@ with sync_playwright() as p:
     pg.click("#vClose")
     pg.tap("nav.bottom button[data-tab=settings]"); pg.wait_for_timeout(1500)
     pg.screenshot(path=f"{OUT}/4-settings.png")
-    pg.locator("#igCard").scroll_into_view_if_needed(); pg.evaluate("document.getElementById('igCard').scrollIntoView({block:'start'}); window.scrollBy(0,-70)"); pg.wait_for_timeout(500)
-    pg.screenshot(path=f"{OUT}/5-instagram-cookie-expired.png")
-    pill = pg.inner_text("#igPill"); msg = pg.inner_text("#igMsg")
-    print("tiles:", n, "| IG pill:", pill, "| msg:", msg)
+    pg.locator("#extCard").scroll_into_view_if_needed(); pg.wait_for_timeout(500)
+    pg.screenshot(path=f"{OUT}/5-settings-extension.png")
+    title = pg.inner_text("#extCard")
+    assert pg.locator("#cookieIn, #igCard, #cookieSave").count() == 0
+    assert "extension-only" in title
+    print("tiles:", n, "| extension card:", title.split("\n")[0])
     b.close()
 print("console errors:", errs)

@@ -33,6 +33,8 @@ with sync_playwright() as p:
     pg.locator("#extCard").screenshot(path=f"{OUT}/12-extension-card.png")
     pg.locator("#igExportStatus").scroll_into_view_if_needed()
     print("ig export text:", pg.inner_text("#igExportStatus"))
-    print("legacy title:", pg.inner_text("#igCard .card-h"))
+    print("extension title:", pg.inner_text("#extCard .card-h"))
+    assert pg.locator("#igCard, #cookieIn").count() == 0
+    assert "extension-only" in pg.inner_text("#extCard")
     print("errors:", errs)
     b.close()

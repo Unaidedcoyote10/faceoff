@@ -27,7 +27,15 @@ def check(name, cond, extra=""):
     fail += (not cond)
 
 
+os.makedirs(os.environ["DATA_DIR"], exist_ok=True)
+cookie_path = os.path.join(os.environ["DATA_DIR"], "ig_cookie.json")
+with open(cookie_path, "w") as f:
+    f.write('{"sessionid":"should-be-deleted"}')
+with open(os.path.join(os.environ["DATA_DIR"], "settings.json"), "w") as f:
+    json.dump({"ig_enabled": True, "ig_mode": "box", "default_mode": "blur", "ext_token": ""}, f)
+
 with TestClient(main.app) as c:
+    check("leftover Instagram cookie file removed", not os.path.exists(cookie_path))
     # auth
     r = c.post("/api/ingest", data={"meta": "{}"}, files={"file": ("a.jpg", b"x")})
     check("ingest without token → 401", r.status_code == 401)
@@ -50,6 +58,21 @@ with TestClient(main.app) as c:
     check("ping with wrong token → 401", c.get("/api/ext/ping", headers={"X-Faceoff-Token": "nope"}).status_code == 401)
     st = c.get("/api/settings").json()
     check("settings never returns token", "ext_token" not in st["settings"] and tok not in json.dumps(st))
+    check("legacy pull settings are gone", not any(k.startswith("ig_") and k != "ig_export" for k in st["settings"]))
+    cookie_body = {"cookie": "sessionid=123456789%3AFAKEsession%3A1%3Aabc"}
+    for method, path in (("GET", "/api/instagram"), ("POST", "/api/instagram/cookie"),
+                         ("DELETE", "/api/instagram/cookie"), ("POST", "/api/instagram/check")):
+        r = c.request(method, path, json=cookie_body)
+        check(f"{method} {path} is gone", r.status_code == 404, r.status_code)
+    html = c.get("/").text
+    js = c.get("/static/app.js").text
+    check("settings UI is extension-only", "extension-only" in html and "cookieIn" not in html
+          and "Paste session cookie" not in html and "/api/instagram" not in html)
+    check("app script has no cookie paste", "cookieIn" not in js and "/api/instagram" not in js)
+    c.post("/api/settings", json={"ig_enabled": True, "default_mode": "box"})
+    st2 = c.get("/api/settings").json()["settings"]
+    check("server pull cannot be turned back on", "ig_enabled" not in st2 and st2["default_mode"] == "box")
+    c.post("/api/settings", json={"default_mode": "blur"})
     pre = c.options("/api/ingest", headers={"Origin": "chrome-extension://abc", "Access-Control-Request-Method": "POST"})
     check("CORS preflight for extension", pre.status_code == 204 and pre.headers.get("access-control-allow-origin") == "chrome-extension://abc")
 

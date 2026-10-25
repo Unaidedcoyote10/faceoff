@@ -20,8 +20,7 @@ DEFAULT_SETTINGS = {
     "auto_export": os.environ.get("AUTO_EXPORT", "1") not in ("0", "false", "no"),
     "export_subfolders": True,  # export/YYYY-MM/...
     "export_folder_prefix": True,  # folder uploads: prefix export names with the source folder
-    # Instagram
-    "ig_enabled": False,  # legacy server-side pull: opt-in only
+    # Instagram sync is extension-only (Faceoff Sync). The server never stores a session cookie.
     "ext_token": "",
     # Instagram safety: server-side kill switch the extension (v2) checks before EVERY Instagram request.
     "ext_paused": True,
@@ -31,13 +30,11 @@ DEFAULT_SETTINGS = {
     "ext_page_min_s": 45, "ext_page_max_s": 120,
     "ext_pages_per_day": 40, "ext_new_check_min_h": 3, "ext_new_check_max_h": 6,
     "ext_stop_hours": 48,
-    "ig_export": True,  # export extension/IG items to the IG export folder (if one is mounted)
-    "ig_interval_hours": 6.0,
-    "ig_per_run_cap": 8,
-    "ig_first_run": "baseline",  # baseline | grab
-    "ig_first_run_grab": 5,
-    "ig_mode": "",  # '' = use default_mode
+    "ig_export": True,  # export extension items to the IG export folder (if one is mounted)
 }
+
+# Retired server-side pull. Dropped on load so a saved cookie schedule cannot come back.
+_LEGACY_PULL_KEYS = ("ig_enabled", "ig_interval_hours", "ig_per_run_cap", "ig_first_run", "ig_first_run_grab", "ig_mode")
 
 _lock = threading.RLock()
 
@@ -247,7 +244,9 @@ def load_settings() -> dict:
     s = dict(DEFAULT_SETTINGS)
     try:
         with open(SETTINGS_PATH) as f:
-            s.update(json.load(f))
+            stored = json.load(f)
+        if isinstance(stored, dict):
+            s.update({k: v for k, v in stored.items() if k not in _LEGACY_PULL_KEYS})
     except (FileNotFoundError, ValueError):
         pass
     return s
@@ -261,16 +260,9 @@ def save_settings(new: dict, _internal: bool = False) -> dict:
                 s[k] = v
         # validation / clamps
         s["default_mode"] = s["default_mode"] if s["default_mode"] in ("blur", "box") else "blur"
-        s["ig_mode"] = s["ig_mode"] if s["ig_mode"] in ("", "blur", "box") else ""
         s["sensitivity"] = s["sensitivity"] if s["sensitivity"] in ("low", "medium", "high") else "medium"
         s["padding"] = max(0.0, min(0.4, float(s["padding"])))
         s["blur_strength"] = max(1, min(5, int(s["blur_strength"])))
-        from . import instagram  # floor lives there
-
-        s["ig_interval_hours"] = max(instagram.MIN_INTERVAL_HOURS, min(72.0, float(s["ig_interval_hours"])))
-        s["ig_per_run_cap"] = max(1, min(instagram.MAX_PER_RUN, int(s["ig_per_run_cap"])))
-        s["ig_first_run"] = s["ig_first_run"] if s["ig_first_run"] in ("baseline", "grab") else "baseline"
-        s["ig_first_run_grab"] = max(0, min(20, int(s["ig_first_run_grab"])))
         s["ext_token"] = str(s.get("ext_token") or "")
         s["ext_page_min_s"] = max(30, int(s.get("ext_page_min_s") or 45))
         s["ext_page_max_s"] = max(s["ext_page_min_s"] + 10, int(s.get("ext_page_max_s") or 120))
@@ -278,7 +270,7 @@ def save_settings(new: dict, _internal: bool = False) -> dict:
         s["ext_new_check_min_h"] = max(2, float(s.get("ext_new_check_min_h") or 3))
         s["ext_new_check_max_h"] = max(s["ext_new_check_min_h"], float(s.get("ext_new_check_max_h") or 6))
         s["ext_stop_hours"] = max(24, min(168, float(s.get("ext_stop_hours") or 48)))
-        for b in ("auto_export", "export_subfolders", "export_folder_prefix", "ig_enabled", "ig_export", "ext_paused",
+        for b in ("auto_export", "export_subfolders", "export_folder_prefix", "ig_export", "ext_paused",
                   "ext_backfill_enabled"):
             s[b] = bool(s[b])
         tmp = SETTINGS_PATH + ".tmp"
