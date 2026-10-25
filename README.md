@@ -2,9 +2,11 @@
 
 # Faceoff
 
-**Faceoff** is a self-hosted, mobile-first web app that hides faces in photos. Each face can be blurred with a tight, feathered oval or covered with a solid black box. Every processed photo is written automatically to an export folder of your choice.
+**Faceoff** is a self-hosted, mobile-first web app that hides faces in photos. Each face can be blurred with a tight, feathered oval or covered with a solid black box. The rest of the image is kept. Every processed photo is written automatically to an export folder of your choice.
 
-An optional browser extension, **Faceoff Sync**, copies the posts you save on Instagram into Faceoff's **Saved** library, so you can pick which ones to redact. The extension runs in your own logged-in browser; the Faceoff server never talks to Instagram and never sees your Instagram cookies.
+Creators building AI or art reference libraries use it to collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into a library or export folder. Built for reference workflows — pull saves, redact faces, drop clean refs into your library.
+
+An optional browser extension, **Faceoff Sync**, copies the posts you save on Instagram into Faceoff's **Saved** library, so you can pick which ones to redact. The extension runs in your own logged-in browser; the Faceoff server never talks to Instagram and never sees your Instagram cookies. Photos can be redacted; videos stay raw. Automated access may be against Instagram's terms — use the extension at your own risk, or skip it. Faceoff works without it.
 
 Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a Raspberry Pi 4/5 (arm64) and on any x86-64 machine. The UI is plain HTML/CSS/JS, with no front-end build step.
 
@@ -12,6 +14,7 @@ Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a 
 
 ## Contents
 
+- [Use cases](#use-cases)
 - [Features](#features)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
@@ -26,6 +29,12 @@ Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a 
 - [License and credits](#license-and-credits)
 
 ---
+
+## Use cases
+
+- **AI and art reference libraries.** Collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into your library or export folder. Saved videos stay raw and are not redacted.
+
+The same blur-or-box export is what the app does for any photo you process. Originals stay in the private data folder; only the redacted copies are written to the export folder.
 
 ## Features
 
