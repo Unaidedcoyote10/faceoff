@@ -16,7 +16,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import instagram, redact, saved, store, worker
+from . import docwork, instagram, keywords, redact, saved, store, worker
 
 APP_NAME = "Faceoff"
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -70,9 +70,10 @@ def startup():
     if st.get("status") == "running":
         instagram._set(status="pending", message="Restarted during a check; will retry on schedule.")
     worker.resume()
+    docwork.resume()
     threading.Thread(target=instagram.scheduler_loop, args=(_stop,), daemon=True, name="ig-scheduler").start()
-    log.info("%s ready. data=%s export=%s workers=%s auth=%s", APP_NAME, store.DATA_DIR, worker.EXPORT_DIR,
-             worker.WORKERS, "on" if APP_PASSWORD else "off")
+    log.info("%s ready. data=%s export=%s workers=%s auth=%s ocr=%s", APP_NAME, store.DATA_DIR, worker.EXPORT_DIR,
+             worker.WORKERS, "on" if APP_PASSWORD else "off", "on" if keywords.ocr_available() else "off")
 
 
 @app.on_event("shutdown")
@@ -458,6 +459,95 @@ async def saved_delete(request: Request):
     ids = [int(i) for i in (body.get("ids") or [])][:20000]
     n = sum(1 for i in ids if store.saved_delete(i))
     return {"deleted": n}
+
+
+# ---------------------------------------------------------------- Document keyword redaction (separate from face blur/box)
+def _doc_name(name: str) -> str:
+    base = os.path.basename((name or "document").replace("\\", "/"))
+    base = "".join(ch for ch in base if ch.isalnum() or ch in "._- ")[:80].strip() or "document"
+    return base
+
+
+def _doc_pub(d: dict) -> dict:
+    return {
+        "id": d["id"], "created": d["created"], "name": d["name"], "kind": d["kind"], "status": d["status"],
+        "keywords": d.get("keywords") or [], "pages": d.get("pages") or 0, "hits": d.get("hits") or 0,
+        "by_phrase": d.get("hit_detail") or {}, "ocr_pages": d.get("ocr_pages") or 0, "note": d.get("note") or "",
+        "error": d.get("error"), "exported": os.path.basename(d["export_path"]) if d.get("export_path") else None,
+        "preview_page": d.get("preview_page") or 1, "progress": d.get("progress"), "out_ext": d.get("out_ext") or "",
+        "v": int(d.get("processed_at") or 0),
+    }
+
+
+@app.get("/api/docs")
+def docs_list():
+    rows = store.doc_list()
+    return {"items": [_doc_pub(r) for r in rows], "counts": store.doc_counts(), "limits": keywords.limits()}
+
+
+@app.post("/api/docs")
+async def docs_upload(file: UploadFile = File(...), keywords_text: str = Form("", alias="keywords")):
+    try:
+        phrases = keywords.parse_keywords(keywords_text)
+    except keywords.DocError as e:
+        raise HTTPException(400, str(e))
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "That file is empty.")
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"Over {MAX_UPLOAD_MB}MB.")
+    name = _doc_name(file.filename or "document")
+    try:
+        kind = keywords.kind_for(name)
+    except keywords.DocError as e:
+        raise HTTPException(400, str(e))
+    if kind == "pdf" and not data.startswith(b"%PDF"):
+        raise HTTPException(400, "That file is not a PDF.")
+    id_ = docwork.add(data, name, phrases)
+    return {"id": id_, "status": "queued"}
+
+
+def _doc(id_: int) -> dict:
+    r = store.doc_get(id_)
+    if not r:
+        raise HTTPException(404, "Not found")
+    return r
+
+
+@app.get("/api/docs/{id_}")
+def docs_one(id_: int):
+    return _doc_pub(_doc(id_))
+
+
+@app.get("/api/docs/{id_}/file/{kind}")
+def docs_file(id_: int, kind: str):
+    r = _doc(id_)
+    if r["status"] != "done":
+        raise HTTPException(409, "Not ready")
+    paths = store.doc_paths(id_, r.get("ext") or "", r.get("out_ext") or "")
+    if kind == "preview":
+        if not os.path.exists(paths["preview"]):
+            raise HTTPException(404, "No preview")
+        return FileResponse(paths["preview"], media_type="image/jpeg", headers={"Cache-Control": "private, max-age=31536000, immutable"})
+    if kind in ("result", "download"):
+        path = paths["processed"]
+        if not os.path.exists(path):
+            raise HTTPException(404, "Not ready")
+        ext = r.get("out_ext") or os.path.splitext(path)[1].lower()
+        media = "application/pdf" if ext == ".pdf" else ("image/png" if ext == ".png" else "image/jpeg")
+        headers = {"Cache-Control": "private, max-age=31536000, immutable"}
+        if kind == "download":
+            stem = os.path.splitext(_doc_name(r["name"]))[0] or f"doc{id_}"
+            headers["Content-Disposition"] = _attachment(f"{stem}_redact{ext}")
+        return FileResponse(path, media_type=media, headers=headers)
+    raise HTTPException(404, "Unknown file")
+
+
+@app.delete("/api/docs/{id_}")
+def docs_delete(id_: int):
+    if not store.doc_delete(id_):
+        raise HTTPException(404, "Not found")
+    return {"ok": True, "note": "Removed from Docs. The exported file was kept."}
 
 
 @app.get("/api/ext/download")

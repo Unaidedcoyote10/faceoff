@@ -4,6 +4,8 @@
 
 **Faceoff** is a self-hosted, mobile-first web app that hides faces in photos. Each face can be blurred with a tight, feathered oval or covered with a solid black box. The rest of the image is kept. Every processed photo is written automatically to an export folder of your choice.
 
+The same app also has a **Docs** tool that blacks out keywords and phrases in PDFs and in photos of text. Face detection and keyword redaction are separate tools: Docs does not look for faces, and the photo Blur/Box flow does not search for words.
+
 Creators building AI or art reference libraries use it to collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into a library or export folder. Built for reference workflows — pull saves, redact faces, drop clean refs into your library.
 
 An optional browser extension, **Faceoff Sync**, copies the posts you save on Instagram into Faceoff's **Saved** library, so you can pick which ones to redact. The extension runs in your own logged-in browser; the Faceoff server never talks to Instagram and never sees your Instagram cookies. Photos can be redacted; videos stay raw. Automated access may be against Instagram's terms — use the extension at your own risk, or skip it. Faceoff works without it.
@@ -21,6 +23,7 @@ Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a 
 - [Configuration](#configuration) (env vars and volumes)
 - [Faceoff Sync browser extension](#faceoff-sync-browser-extension)
 - [Using Faceoff](#using-faceoff)
+- [Keyword redaction (Docs)](#keyword-redaction-docs)
 - [Build from source](#build-from-source)
 - [API overview](#api-overview)
 - [Security and privacy notes](#security-and-privacy-notes)
@@ -33,12 +36,14 @@ Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a 
 ## Use cases
 
 - **AI and art reference libraries.** Collect reference images (including optional Instagram saves), redact faces, keep the rest of the image, and drop the clean refs into your library or export folder. Saved videos stay raw and are not redacted.
+- **Keyword redaction.** Black out names, account numbers, or other phrases in a PDF or a photo of a page, then export the flattened copy beside your other files. This does not replace face blur.
 
 The same blur-or-box export is what the app does for any photo you process. Originals stay in the private data folder; only the redacted copies are written to the export folder.
 
 ## Features
 
 - **Blur or Box.** Choose per upload or per selection, and redo an item in the other mode later. Blur strength, padding (0–30%) and detection sensitivity (Low/Medium/High) are adjustable in Settings.
+- **Docs (keyword redaction).** A separate tab. Upload a PDF or an image of text, list keywords or phrases, and Faceoff covers each match with a solid black box. Originals stay in the private data folder. The redacted copy is written to the same export folder as photos. See [Keyword redaction](#keyword-redaction-docs) for formats and limits.
 - **Accurate face detection.** Uses OpenCV's **YuNet** detector in several passes: a downscaled pass for close-ups, a mid-resolution pass, and high-resolution tiles for small faces in crowds. Boxes are mapped back to full resolution, and low-confidence large hits are checked again to cut down pet and object false positives. EXIF orientation is applied, and EXIF/GPS metadata is stripped from the output.
 - **Bulk upload.** Pick many photos on a phone, or drag and drop files or whole folders (subfolders included) on desktop. Non-images and system files are skipped. Uploads are chunked with automatic retry, and a background queue processes them (2 workers by default).
 - **Auto-export.** Every processed photo is written to the export folder you mount. Names look like `20261023-173901_upload_IMG_1234_blur.jpg`, with optional `YYYY-MM/` sub-folders and an optional source-folder prefix. Writes are atomic, with configurable permissions and owner (`PUID`/`PGID`, `UMASK`). This works well with a network share.
@@ -62,7 +67,7 @@ The same blur-or-box export is what the app does for any photo you process. Orig
 - About 1 GB RAM for the container (the default `mem_limit`), plus disk space for your photos.
 - **Raspberry Pi:** Pi 4 or 5 on a **64-bit** OS (arm64). `python:3.12-slim` and `opencv-python-headless` publish arm64 wheels, so the image builds natively on the Pi. The first build takes a few minutes. Keep `WORKERS=2` on a Pi 4.
 - **x86-64:** any Linux, macOS or Windows host with Docker.
-- Internet access **at build time** to download Python packages and the YuNet model. No outbound access is needed at runtime.
+- Internet access **at build time** to download Python packages, the YuNet model, and Tesseract's English data (used only by Docs). No outbound access is needed at runtime.
 - For the extension: a Chromium browser (Chrome, Brave, Edge, …) on a computer.
 
 ## Quick start
@@ -136,6 +141,10 @@ Advanced variables can be set in the `environment:` section of `docker-compose.y
 | `LOG_LEVEL` | `INFO` | Python log level. |
 | `DATA_DIR` / `EXPORT_DIR` / `IG_EXPORT_DIR` | `/data` / `/export` / `/export-ig` | Container-side paths. Change only if you change the mounts. |
 | `YUNET_MODEL` | `/app/models/face_detection_yunet_2023mar.onnx` | Path to the face-detection model. |
+| `DOC_MAX_PAGES` | `40` | Page cap for keyword redaction. |
+| `DOC_DPI` | `144` | Resolution used when a redacted PDF is flattened. |
+| `DOC_OCR` | `1` | `0` turns off Tesseract. Text PDFs still work. |
+| `DOC_OCR_MAX_SIDE` | `2200` | Longest side, in pixels, for an OCR pass. |
 
 Everything else (blur strength, export sub-folders and prefixes, extension pacing, pause state) is set in the **Settings** tab and stored in `/data`.
 
@@ -170,7 +179,8 @@ Use it at your own risk. Automated access may be against Instagram's terms; the 
 
 ## Using Faceoff
 
-- **Upload tab:** pick photos or a folder, choose Blur or Box, and watch the queue. Results land in the Gallery and the export folder.
+- **Upload tab:** pick photos or a folder, choose Blur or Box, and watch the queue. Results land in the Gallery and the export folder. This tab is photos only.
+- **Docs tab:** black out keywords in a PDF or a photo of text. This does not blur faces. See below.
 - **Gallery:** tap to flip before/after, use ⤢ for the viewer and slider, ⬇ to save to the device, or *Redo as box/blur*.
 - **Saved tab:** browse Instagram saves by post or by account. *Select* items, then Blur / Box (photos), Save, or Delete. *▶ Watch as feed* opens the video feed.
 - **Settings:**
@@ -182,6 +192,47 @@ Use it at your own risk. Automated access may be against Instagram's terms; the 
 ### Legacy server-side pull (off by default)
 
 An older mode lets the server poll your Instagram saves with a pasted session cookie. The cookie is stored only in `/data` (mode 600) and masked in the UI and API. This mode is **disabled by default** and not recommended; the extension is the supported path.
+
+## Keyword redaction (Docs)
+
+Docs is a second tool in the same app. It does not run face detection, and the photo Blur/Box settings (padding, sensitivity, blur strength) do not apply to it. Instagram sync is unchanged: the extension notes above still apply to the Saved library, and Docs never talks to Instagram.
+
+### What you can upload
+
+| Input | How matches are found |
+|---|---|
+| **PDF with selectable text** (you can highlight the words) | PDFium reads the text layer and matches whole words and phrases. Case-insensitive. |
+| **Scanned PDF** (no text layer) | The page is rendered and read with **Tesseract OCR**, English only. |
+| **Image of text** — JPEG, PNG, WEBP, HEIC, TIFF, BMP | Same English OCR pass. |
+
+A page that already has selectable text is not also OCR'd. Words that exist only inside a picture on that page are missed.
+
+### What you get
+
+- Each match is covered with a **solid black box**.
+- The original upload is stored under the private data folder and is not modified.
+- A new file is written to the same export folder as photos (including `YYYY-MM/` sub-folders when that setting is on). Names look like `20261025-204500_doc_report_redact.pdf`. The keywords are not put in the file name.
+- PDF output is a **flattened image PDF**: the covered words are not left behind as text you can select or copy. The rest of the page is pixels too, so links, form fields, and the original metadata are not kept. Image uploads come back as JPEG, or PNG when the upload was PNG or WEBP.
+
+### Limits (read these)
+
+This is a practical first cut for a Pi-friendly app, not a certified or forensic redaction tool. Review every output.
+
+- **OCR is imperfect.** Tesseract's English model misses handwriting, rotated or skewed pages, tiny type, stylized fonts, and text that is not English. A match it misses stays visible.
+- **Phrases should sit on one line.** A phrase split across a line break is often missed. `cat` does not match `category` (whole words only). The black box is padded so glyph edges do not peek out, which can also cover a very short word sitting right against a match.
+- **Page cap.** PDFs longer than `DOC_MAX_PAGES` (40 by default) are rejected so a small machine can finish the job. One document is processed at a time. Render size is capped (`DOC_DPI`, `DOC_OCR_MAX_SIDE`) so memory stays modest. There is no large neural OCR model.
+- **Password-protected PDFs** are rejected.
+- **Not a full sanitizer.** Flattening removes the text layer of the pages we rewrite, but this does not promise that every hidden copy of a word is gone (for example, text OCR failed to see). Do not treat it as legally sufficient redaction.
+- **JPEG output** is visually black over the match. Very small compression traces can remain at the edge of a box; the box is padded so the glyphs themselves are covered. It is still not a pixel-forensic wipe.
+- Face Blur/Box and Docs do not run on the same upload. A photo sent to Docs is only searched for words. A photo sent to Upload is only searched for faces.
+
+### Manual check
+
+1. Open **Docs**. Confirm Upload still offers only Blur / Box for photos.
+2. Enter a keyword that appears in a text PDF, upload it, and wait until the card shows a match count.
+3. Download the PDF and try to select text: the covered word should be a black bar, and the original file on disk should be unchanged.
+4. Confirm a new `*_doc_*_redact.pdf` appeared in the export folder, and that the Gallery did not gain the document.
+5. Optional: photograph a printed line, or upload a scan, and expect OCR to miss some words.
 
 ## Build from source
 
@@ -195,7 +246,7 @@ docker buildx build --platform linux/arm64,linux/amd64 -t faceoff .
 
 The [`Dockerfile`](Dockerfile):
 
-1. Installs `requirements.txt` on `python:3.12-slim`.
+1. Installs Tesseract OCR (English) and `requirements.txt` on `python:3.12-slim`.
 2. Downloads the YuNet model from the OpenCV Zoo and checks that it loads.
 3. Copies `app/`, `extension/` and `tests/`.
 4. Runs as an unprivileged user with a health check on `/api/health`.
@@ -205,6 +256,8 @@ The [`Dockerfile`](Dockerfile):
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
+# Docs OCR (optional for text PDFs, required for scans and photos of text):
+#   sudo apt install tesseract-ocr tesseract-ocr-eng
 ./scripts/get_model.sh                    # downloads models/face_detection_yunet_2023mar.onnx
 mkdir -p data export
 DATA_DIR=./data EXPORT_DIR=./export uvicorn app.main:app --host 0.0.0.0 --port 8088 --reload
@@ -230,6 +283,7 @@ All endpoints are under the same origin as the UI. If `APP_PASSWORD` is set, eve
 |---|---|
 | Health | `GET /api/health` |
 | Upload and gallery | `POST /api/upload` (multipart), `GET /api/images`, `GET /api/images/{id}`, `GET /api/images/{id}/file/{thumb-before\|thumb-after\|before\|after\|full}`, `POST /api/images/{id}/reprocess`, `DELETE /api/images/{id}` |
+| Docs (keywords) | `POST /api/docs` (multipart: `file` + `keywords`, one phrase per line), `GET /api/docs`, `GET /api/docs/{id}`, `GET /api/docs/{id}/file/{preview\|download}`, `DELETE /api/docs/{id}` |
 | Settings | `GET /api/settings`, `POST /api/settings` |
 | Saved library | `GET /api/saved` (filter, sort, kind, owner, paging), `GET /api/saved/owners`, `GET /api/saved/ids`, `GET /api/saved/batch?ids=`, `GET /api/saved/{id}`, `GET /api/saved/{id}/file/{thumb\|original\|download}` (Range supported), `POST /api/saved/process`, `POST /api/saved/delete` |
 | Extension (token) | `GET /api/ext/control` (pause flag and pacing limits), `POST /api/ext/report` (warning → server pause), `GET /api/ext/ping`, `POST /api/ingest/known`, `POST /api/ingest` (multipart: `meta` JSON + `file`) |
@@ -245,7 +299,8 @@ While sync is paused, `POST /api/ingest` and `/api/ingest/known` return `423 Loc
 - **Server-side pause flag.** One switch in Settings stops all extension activity before its next request. Warnings reported by the extension flip it automatically. New installs start paused.
 - **Metadata.** Exported photos have EXIF/GPS stripped. Originals stay in `/data`, so treat that folder as private.
 - **Exposure.** Faceoff is built for a private network. If you expose it, put it behind HTTPS and set `APP_PASSWORD`.
-- **Video is never redacted.** Only photos are processed.
+- **Video is never redacted.** Only photos are processed by face detection. Keyword redaction accepts PDFs and still images, and writes a new file; it does not change that rule.
+- **Docs output.** Keyword jobs keep the upload in `/data` and write a separate flattened copy to the export folder. Treat `/data` as private. The Docs tool is not a certified sanitizer; see [Keyword redaction](#keyword-redaction-docs).
 
 ## Tests
 
@@ -254,6 +309,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 | Test | What it checks | How to run |
 |---|---|---|
 | `tests/ingest_test.py` | Pairing and token auth, CORS, the pause flag (423 while paused, auto-pause on report), ingest → Saved, dedupe, raw IG export layout, thumbnails, Range/416, download attachment headers, processing → export folder, gallery integration and pruning | `DATA_DIR=/tmp/fo EXPORT_DIR=/tmp/fo/x IG_EXPORT_ENABLED=1 IG_EXPORT_DIR=/tmp/fo/ig GALLERY_LIMIT=3 python -m tests.ingest_test` |
+| `tests/docs_redact_test.py` | Keyword parsing, whole-word PDF redaction (text layer removed, kept words still visible), scanned-page OCR when Tesseract is installed, export filename, original bytes untouched, Docs kept out of the photo gallery | `python -m tests.docs_redact_test` |
 | `tests/ext/e2e_extension.py` + `tests/ext/mock_ig.py` | Loads the unpacked extension in Chromium against a local HTTPS mock of instagram.com and its CDN. Covers zero requests while paused, baseline, the 3–6 h schedule, backfill gated by the server, a single paced page, and a 429 triggering a 48 h stop plus server auto-pause. | start Faceoff on `127.0.0.1:8088`, run `python3 tests/ext/mock_ig.py`, then `python3 tests/ext/e2e_extension.py` (needs Playwright + Chromium; the mock creates its own throwaway TLS cert) |
 | `tests/ig_mock_test.py` | Legacy server pull against a mock | `docker exec faceoff python /app/tests/ig_mock_test.py` |
 | `tests/*_shots.py` | Phone-width UI checks with Playwright (feed, by-user, save, logo, folder drop) against a running instance with some data | `python3 tests/save_shots.py http://localhost:8088 /tmp/shots` |
@@ -261,8 +317,8 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 ## Project layout
 
 ```
-app/            FastAPI app (main.py), redaction (redact.py), queue (worker.py), SQLite store (store.py),
-                Saved library (saved.py), legacy IG pull (instagram.py), static UI (static/)
+app/            FastAPI app (main.py), face redaction (redact.py), keyword redaction (keywords.py, docwork.py),
+                queue (worker.py), SQLite store (store.py), Saved library (saved.py), legacy IG pull (instagram.py), static UI (static/)
 extension/      Faceoff Sync MV3 extension (background.js, content.js, popup, options, icons)
 scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip)
 tools/          logo geometry + icon generator
@@ -274,4 +330,5 @@ Dockerfile, docker-compose.yml, .env.example
 
 - Faceoff is released under the [MIT License](LICENSE).
 - Face detection uses **YuNet** from the [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) (MIT License). The model is downloaded at build time and not stored in this repository.
+- Keyword redaction uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) / PDFium (Apache-2.0 or BSD-3-Clause) and, for scans and photos, [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) (Apache-2.0) via pytesseract. English trained data is installed in the image. No extra model download.
 - Test images (`tests/samples/`) are public-domain historical photographs from Wikimedia Commons: Albert Einstein (1921), Abraham Lincoln (1863), and the 1927 Solvay Conference. `tests/video/clip4s_small.mp4` is a synthetic test pattern.

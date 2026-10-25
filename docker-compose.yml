@@ -24,6 +24,10 @@ services:
       UMASK: ${UMASK:-002}
       EXPORT_FILE_MODE: ${EXPORT_FILE_MODE:-664}
       IG_MIN_INTERVAL_HOURS: ${IG_MIN_INTERVAL_HOURS:-2}
+      DOC_MAX_PAGES: ${DOC_MAX_PAGES:-40}       # keyword redaction page cap (Docs tab)
+      DOC_DPI: ${DOC_DPI:-144}                  # flatten DPI for redacted PDFs
+      DOC_OCR: ${DOC_OCR:-1}                    # 0 disables Tesseract (text PDFs still work)
+      DOC_OCR_MAX_SIDE: ${DOC_OCR_MAX_SIDE:-2200}
     volumes:
       # Originals, previews and the SQLite DB. Keep this private (not on a shared folder).
       - type: bind

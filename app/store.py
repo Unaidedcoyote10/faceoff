@@ -46,6 +46,8 @@ def ensure_dirs():
     os.makedirs(os.path.join(DATA_DIR, "saved"), exist_ok=True)
     for d in ("originals", "processed", "thumbs"):
         os.makedirs(os.path.join(DATA_DIR, d), exist_ok=True)
+    for d in ("originals", "processed", "thumbs"):
+        os.makedirs(os.path.join(DATA_DIR, "docs", d), exist_ok=True)
 
 
 def conn():
@@ -91,8 +93,32 @@ def init_db():
             owner TEXT, caption TEXT, taken_at REAL, saved_at REAL NOT NULL, kind TEXT NOT NULL, ext TEXT NOT NULL,
             size INTEGER, width INTEGER, height INTEGER, duration REAL, raw_export_path TEXT, image_id INTEGER)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_saved_at ON saved(saved_at)")
+        # Keyword redaction jobs. Separate from the photo gallery so face blur never sees them.
+        c.execute("""CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created REAL NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            ext TEXT NOT NULL,
+            out_ext TEXT,
+            status TEXT NOT NULL,
+            keywords TEXT NOT NULL,
+            pages INTEGER DEFAULT 0,
+            hits INTEGER DEFAULT 0,
+            hit_detail TEXT,
+            ocr_pages INTEGER DEFAULT 0,
+            note TEXT,
+            error TEXT,
+            width INTEGER, height INTEGER,
+            export_path TEXT,
+            preview_page INTEGER DEFAULT 1,
+            progress REAL,
+            processed_at REAL
+        )""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_docs_created ON documents(created)")
         # recover jobs interrupted by a restart
         c.execute("UPDATE images SET status='queued' WHERE status='processing'")
+        c.execute("UPDATE documents SET status='queued' WHERE status='processing'")
 
 
 def row(r):
@@ -375,3 +401,98 @@ def saved_delete(sid: int):
     if r.get("image_id"):
         delete_image(r["image_id"])
     return True
+
+
+# ------------------------------------------------------------------ Document keyword redaction
+DOC_LIBRARY_LIMIT = int(os.environ.get("DOC_LIBRARY_LIMIT", "50"))
+DOCS_DIR = os.path.join(DATA_DIR, "docs")
+
+
+def doc_paths(id_: int, ext: str = "", out_ext: str = "") -> dict:
+    return {
+        "original": os.path.join(DOCS_DIR, "originals", f"{id_}{ext or ''}"),
+        "processed": os.path.join(DOCS_DIR, "processed", f"{id_}{out_ext or ''}"),
+        "preview": os.path.join(DOCS_DIR, "thumbs", f"{id_}.jpg"),
+    }
+
+
+def _doc_row(r):
+    if r is None:
+        return None
+    d = dict(r)
+    try:
+        d["keywords"] = json.loads(d["keywords"]) if d.get("keywords") else []
+    except (TypeError, ValueError):
+        d["keywords"] = []
+    try:
+        d["hit_detail"] = json.loads(d["hit_detail"]) if d.get("hit_detail") else {}
+    except (TypeError, ValueError):
+        d["hit_detail"] = {}
+    return d
+
+
+def doc_insert(**kw) -> int:
+    if "keywords" in kw and not isinstance(kw["keywords"], str):
+        kw["keywords"] = json.dumps(kw["keywords"])
+    kw.setdefault("created", time.time())
+    kw.setdefault("status", "queued")
+    with _lock, conn() as c:
+        cur = c.execute(f"INSERT INTO documents ({','.join(kw)}) VALUES ({','.join('?' * len(kw))})", list(kw.values()))
+        return cur.lastrowid
+
+
+def doc_update(id_: int, **kw):
+    if not kw:
+        return
+    if "keywords" in kw and not isinstance(kw["keywords"], str):
+        kw["keywords"] = json.dumps(kw["keywords"])
+    if "hit_detail" in kw and not isinstance(kw["hit_detail"], str):
+        kw["hit_detail"] = json.dumps(kw["hit_detail"])
+    with _lock, conn() as c:
+        c.execute(f"UPDATE documents SET {','.join(k + '=?' for k in kw)} WHERE id=?", [*kw.values(), id_])
+
+
+def doc_get(id_: int):
+    with conn() as c:
+        return _doc_row(c.execute("SELECT * FROM documents WHERE id=?", (id_,)).fetchone())
+
+
+def doc_list(limit=DOC_LIBRARY_LIMIT):
+    with conn() as c:
+        return [_doc_row(r) for r in c.execute("SELECT * FROM documents ORDER BY created DESC, id DESC LIMIT ?", (limit,))]
+
+
+def doc_queued_ids():
+    with conn() as c:
+        return [r[0] for r in c.execute("SELECT id FROM documents WHERE status='queued' ORDER BY id")]
+
+
+def doc_counts():
+    with conn() as c:
+        return {r[0]: r[1] for r in c.execute("SELECT status, COUNT(*) FROM documents GROUP BY status")}
+
+
+def doc_delete(id_: int) -> bool:
+    """Remove the library row and private files. The exported copy is kept."""
+    r = doc_get(id_)
+    if not r:
+        return False
+    with _lock, conn() as c:
+        c.execute("DELETE FROM documents WHERE id=?", (id_,))
+    for p in doc_paths(id_, r.get("ext") or "", r.get("out_ext") or "").values():
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+    return True
+
+
+def doc_prune():
+    """Keep the newest DOC_LIBRARY_LIMIT finished jobs. Exports are never deleted."""
+    with conn() as c:
+        old = [r[0] for r in c.execute(
+            "SELECT id FROM documents WHERE status NOT IN ('queued','processing') AND id NOT IN "
+            "(SELECT id FROM documents ORDER BY created DESC, id DESC LIMIT ?)", (DOC_LIBRARY_LIMIT,))]
+    for i in old:
+        doc_delete(i)
+    return len(old)
