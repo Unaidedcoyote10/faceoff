@@ -1,6 +1,6 @@
 // Faceoff service worker: cache the app shell for instant launch; API always network.
-const C = 'faceoff-v15-docs';
-const SHELL = ['/', '/static/style.css?v=docs1', '/static/app.js?v=docs1', '/icons/logo.svg', '/icons/icon-192.png', '/manifest.webmanifest'];
+const C = 'faceoff-v16-presets';
+const SHELL = ['/', '/static/style.css?v=presets1', '/static/app.js?v=presets1', '/icons/logo.svg', '/icons/icon-192.png', '/manifest.webmanifest'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(C).then(c => c.addAll(SHELL)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== C).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

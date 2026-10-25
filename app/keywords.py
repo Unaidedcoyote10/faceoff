@@ -1,7 +1,9 @@
-"""Keyword redaction for PDFs and images. Separate from face blur/box.
+"""Keyword and preset redaction for PDFs and images. Separate from face blur/box.
 
-Text PDFs: PDFium finds whole-word matches. Scans and photos: Tesseract (English),
-if the binary is installed. Output is a new file — callers never overwrite the upload.
+Text PDFs: PDFium finds whole-word keyword matches, and preset detectors (emails,
+phones, money, and light name/address/location heuristics) run on the same text.
+Scans and photos: Tesseract (English), if the binary is installed. Output is a new
+file — callers never overwrite the upload.
 
 PDF output is flattened to images so matched words are not still selectable underneath.
 That also drops the original text layer, metadata, and attachments. It is not a
@@ -17,6 +19,8 @@ import shutil
 from dataclasses import dataclass
 
 from PIL import Image, ImageDraw
+
+from .presets import PRESET_LABELS, PRESET_NOTES, PRESET_ORDER, find_preset_spans, parse_presets
 
 _EDGE = re.compile(r"^[^\w]+|[^\w]+$", re.UNICODE)
 
@@ -73,7 +77,17 @@ def limits() -> dict:
         "max_pages": max_pages(),
         "formats": ["PDF", "JPEG", "PNG", "WEBP", "HEIC", "TIFF", "BMP"],
         "language": "eng" if ocr_available() else None,
+        "presets": [{"id": k, "label": PRESET_LABELS[k], "note": PRESET_NOTES[k]} for k in PRESET_ORDER],
     }
+
+
+def _coerce_presets(presets) -> list[str]:
+    if not presets:
+        return []
+    try:
+        return parse_presets(presets)
+    except ValueError as e:
+        raise DocError(str(e)) from e
 
 
 def normalize_token(s: str) -> str:
@@ -85,9 +99,11 @@ def phrase_tokens(phrase: str) -> list[str]:
     return [t for t in (normalize_token(p) for p in phrase.split()) if t]
 
 
-def parse_keywords(text: str) -> list[str]:
+def parse_keywords(text: str, *, allow_empty: bool = False) -> list[str]:
     """One keyword or phrase per line. Case-insensitive de-dupe. Order kept."""
     if text is None or not str(text).strip():
+        if allow_empty:
+            return []
         raise DocError("Add at least one keyword or phrase, one per line.")
     out, seen = [], set()
     for line in str(text).splitlines():
@@ -106,8 +122,33 @@ def parse_keywords(text: str) -> list[str]:
         if len(out) > 40:
             raise DocError("Use 40 keywords or fewer at a time.")
     if not out:
+        if allow_empty:
+            return []
         raise DocError("Add at least one keyword or phrase, one per line.")
     return out
+
+
+def parse_job(keywords_text: str, presets_value) -> tuple[list[str], list[str]]:
+    """Custom lines plus preset ids. Either side may be empty; both empty is an error."""
+    chosen = _coerce_presets(presets_value)
+    phrases = parse_keywords(keywords_text, allow_empty=True)
+    if not chosen and not phrases:
+        raise DocError("Tick a preset or add at least one keyword or phrase, one per line.")
+    return phrases, chosen
+
+
+def _with_presets(by_phrase: dict, preset_counts: dict | None) -> dict:
+    """Keyword counts plus preset totals. Preset values are counts, never the text that was found."""
+    if not preset_counts:
+        return dict(by_phrase)
+    detail = dict(by_phrase)
+    for key in PRESET_ORDER:
+        if key not in preset_counts:
+            continue
+        label = PRESET_LABELS[key]
+        slot = label if label not in detail else f"{label} (preset)"
+        detail[slot] = preset_counts[key]
+    return detail
 
 
 def find_spans(tokens: list[str], phrases: list[list[str]]) -> list[tuple[int, int, int]]:
@@ -195,20 +236,30 @@ def _preview(im: Image.Image, max_side: int = 1100) -> bytes:
     return buf.getvalue()
 
 
-def _note(hits: int, by_phrase: dict[str, int], ocr_pages: int, skipped_ocr: int, kind: str) -> str:
+def _note(hits: int, by_phrase: dict[str, int], ocr_pages: int, skipped_ocr: int, kind: str,
+          preset_counts: dict | None = None) -> str:
+    preset_counts = preset_counts or {}
     missing = [p for p, n in by_phrase.items() if not n]
     if hits == 0:
-        msg = "No matches, so nothing was blacked out. Check the wording."
+        msg = "No matches, so nothing was blacked out."
+        if by_phrase:
+            msg += " Check the wording."
         if kind == "image" or ocr_pages:
             msg += " OCR misses handwriting, tiny type, and rotated or non-English text."
         elif skipped_ocr:
             msg += " This looks like a scan, and OCR is not available."
+        if preset_counts:
+            msg += " Presets only catch common patterns, so a real name, address, or place can still be visible."
     else:
         found = [f"{p} ×{n}" for p, n in by_phrase.items() if n]
         msg = f"Blacked out {hits} match{'' if hits == 1 else 'es'}"
         if found:
             msg += " (" + ", ".join(found) + ")"
         msg += "."
+    if preset_counts:
+        bits = [f"{PRESET_LABELS[k]} ×{preset_counts[k]}" for k in PRESET_ORDER if k in preset_counts]
+        msg += " Presets: " + ", ".join(bits) + "."
+        msg += " Names, addresses, and locations are guesses; emails, phones, and money follow patterns."
     if missing and hits:
         msg += " Not found: " + ", ".join(missing) + "."
     if ocr_pages:
@@ -221,9 +272,9 @@ def _note(hits: int, by_phrase: dict[str, int], ocr_pages: int, skipped_ocr: int
     return msg
 
 
-def _pdf_match_rects(textpage, phrase: str) -> tuple[int, list[tuple[float, float, float, float]]]:
+def _pdf_match_rects(textpage, phrase: str, whole_word: bool = True) -> tuple[int, list[tuple[float, float, float, float]]]:
     """Return (occurrence count, line rectangles in PDF coordinates)."""
-    searcher = textpage.search(phrase, match_case=False, match_whole_word=True)
+    searcher = textpage.search(phrase, match_case=False, match_whole_word=whole_word)
     try:
         found = 0
         rects = []
@@ -264,10 +315,55 @@ def _pixels(conv, rect, iw: int, ih: int) -> tuple[int, int, int, int] | None:
     return x0, y0, x1, y1
 
 
-def redact_pdf(data: bytes, phrases: list[str], on_progress=None) -> DocResult:
+def _rects_for_span(textpage, text: str, start: int, end: int, nchars: int):
+    """Map a match in extracted text back to PDF rectangles. Falls back to a text search."""
+    import pypdfium2.raw as pdfium_c
+
+    boxes = []
+    for ti in range(max(0, start), min(end, len(text))):
+        if text[ti] in "\r\n\u2028\u2029":
+            continue
+        try:
+            ci = pdfium_c.FPDFText_GetCharIndexFromTextIndex(textpage, ti)
+        except Exception:
+            ci = ti
+        if ci is None or int(ci) < 0 or int(ci) >= nchars:
+            continue
+        try:
+            boxes.append(textpage.get_charbox(int(ci), loose=False))
+        except Exception:
+            continue
+    rects = cluster_line_rects(boxes)
+    if rects:
+        return rects
+    snippet = " ".join(text[start:end].split())
+    if not snippet:
+        return []
+    whole = re.fullmatch(r"[A-Za-z]+(?:[ \t]+[A-Za-z]+)*", snippet) is not None
+    _n, found = _pdf_match_rects(textpage, snippet, whole_word=whole)
+    return found
+
+
+def _preset_page(textpage, presets: list[str]) -> tuple[dict, list]:
+    counts = {p: 0 for p in presets}
+    n = textpage.count_chars()
+    if n <= 0:
+        return counts, []
+    text = textpage.get_text_range(0, n) or ""
+    spans = find_preset_spans(text, presets)
+    rects = []
+    for start, end, kind in spans:
+        if kind in counts:
+            counts[kind] += 1
+        rects.extend(_rects_for_span(textpage, text, start, end, n))
+    return counts, rects
+
+
+def redact_pdf(data: bytes, phrases: list[str], on_progress=None, presets=None) -> DocResult:
     import pypdfium2 as pdfium
     from pypdfium2 import PdfiumError
 
+    chosen = _coerce_presets(presets)
     if not data.startswith(b"%PDF"):
         raise DocError("This file is not a PDF.")
     try:
@@ -277,6 +373,7 @@ def redact_pdf(data: bytes, phrases: list[str], on_progress=None) -> DocResult:
 
     out = pdfium.PdfDocument.new()
     by_phrase = {p: 0 for p in phrases}
+    preset_counts = {p: 0 for p in chosen}
     hits = 0
     ocr_pages = 0
     skipped_ocr = 0
@@ -331,14 +428,26 @@ def redact_pdf(data: bytes, phrases: list[str], on_progress=None) -> DocResult:
                                 px = _pixels(conv, rect, pil.width, pil.height)
                                 if px:
                                     rects_px.append(px)
+                        if chosen:
+                            p_counts, p_rects = _preset_page(tp, chosen)
+                            for key, n_hit in p_counts.items():
+                                preset_counts[key] += n_hit
+                                hits += n_hit
+                            for rect in p_rects:
+                                px = _pixels(conv, rect, pil.width, pil.height)
+                                if px:
+                                    rects_px.append(px)
                     finally:
                         tp.close()
                 elif ocr_available():
                     ocr_pages += 1
-                    boxes, counts = _ocr_hit_boxes(pil, phrases)
+                    boxes, counts, p_counts = _ocr_hit_boxes(pil, phrases, presets=chosen)
                     for pi, phrase in enumerate(phrases):
                         by_phrase[phrase] += counts[pi]
                         hits += counts[pi]
+                    for key, n_hit in p_counts.items():
+                        preset_counts[key] += n_hit
+                        hits += n_hit
                     rects_px.extend(boxes)
                 else:
                     skipped_ocr += 1
@@ -366,9 +475,10 @@ def redact_pdf(data: bytes, phrases: list[str], on_progress=None) -> DocResult:
     if preview_im is None:
         preview_im = Image.new("RGB", (64, 64), "white")
     return DocResult(
-        data=pdf_bytes, ext=".pdf", media_type="application/pdf", pages=n, hits=hits, by_phrase=by_phrase,
+        data=pdf_bytes, ext=".pdf", media_type="application/pdf", pages=n, hits=hits,
+        by_phrase=_with_presets(by_phrase, preset_counts),
         ocr_pages=ocr_pages, preview_jpeg=_preview(preview_im), preview_page=preview_page, width=width, height=height,
-        note=_note(hits, by_phrase, ocr_pages, skipped_ocr, "pdf"), skipped_ocr=skipped_ocr,
+        note=_note(hits, by_phrase, ocr_pages, skipped_ocr, "pdf", preset_counts), skipped_ocr=skipped_ocr,
     )
 
 
@@ -412,10 +522,38 @@ def _ocr_lines(im: Image.Image) -> list[list[dict]]:
     return [lines[k] for k in order]
 
 
-def _ocr_hit_boxes(im: Image.Image, phrases: list[str], scale: float = 1.0) -> tuple[list[tuple[int, int, int, int]], list[int]]:
+def _token_line(tokens: list[dict]) -> tuple[str, list[tuple[int, int, int]]]:
+    parts: list[str] = []
+    spans: list[tuple[int, int, int]] = []
+    pos = 0
+    for i, tok in enumerate(tokens):
+        if i:
+            parts.append(" ")
+            pos += 1
+        start = pos
+        piece = tok["text"]
+        parts.append(piece)
+        pos += len(piece)
+        spans.append((start, pos, i))
+    return "".join(parts), spans
+
+
+def _pad_box(group: list[dict], inv: float) -> tuple[int, int, int, int]:
+    bh = max(t["y1"] - t["y0"] for t in group)
+    pad = max(3, int(round(0.28 * bh)))
+    x0 = min(t["x0"] for t in group) - pad
+    y0 = min(t["y0"] for t in group) - pad
+    x1 = max(t["x1"] for t in group) + pad
+    y1 = max(t["y1"] for t in group) + pad
+    return (int(x0 * inv), int(y0 * inv), int(x1 * inv) + 1, int(y1 * inv) + 1)
+
+
+def _ocr_hit_boxes(im: Image.Image, phrases: list[str], scale: float = 1.0, presets=None):
     """scale is small/full (OCR image size / full image size). Boxes are returned in full-image pixels."""
+    chosen = _coerce_presets(presets)
     ph = [phrase_tokens(p) for p in phrases]
     counts = [0] * len(phrases)
+    pcounts = {p: 0 for p in chosen}
     boxes = []
     try:
         lines = _ocr_lines(im)
@@ -435,15 +573,19 @@ def _ocr_hit_boxes(im: Image.Image, phrases: list[str], scale: float = 1.0) -> t
             kept.append(tok)
         for start, end, pi in find_spans(norms, ph):
             counts[pi] += 1
-            group = kept[start:end]
-            bh = max(t["y1"] - t["y0"] for t in group)
-            pad = max(3, int(round(0.28 * bh)))
-            x0 = min(t["x0"] for t in group) - pad
-            y0 = min(t["y0"] for t in group) - pad
-            x1 = max(t["x1"] for t in group) + pad
-            y1 = max(t["y1"] for t in group) + pad
-            boxes.append((int(x0 * inv), int(y0 * inv), int(x1 * inv) + 1, int(y1 * inv) + 1))
-    return boxes, counts
+            boxes.append(_pad_box(kept[start:end], inv))
+        if chosen:
+            shown = [tok for tok in line if (tok.get("text") or "").strip()]
+            if not shown:
+                continue
+            text, tmap = _token_line(shown)
+            for start, end, kind in find_preset_spans(text, chosen):
+                idxs = [i for a, b, i in tmap if b > start and a < end]
+                if not idxs or kind not in pcounts:
+                    continue
+                pcounts[kind] += 1
+                boxes.append(_pad_box([shown[i] for i in idxs], inv))
+    return boxes, counts, pcounts
 
 
 def _load_pil(data: bytes) -> Image.Image:
@@ -465,7 +607,7 @@ def _image_out_ext(name: str) -> str:
     return ".jpg"
 
 
-def redact_image(data: bytes, name: str, phrases: list[str], on_progress=None) -> DocResult:
+def redact_image(data: bytes, name: str, phrases: list[str], on_progress=None, presets=None) -> DocResult:
     if not ocr_available():
         raise DocError("Photos of text need Tesseract OCR, which is not available. Upload a PDF with selectable text instead.")
     if on_progress:
@@ -483,9 +625,10 @@ def redact_image(data: bytes, name: str, phrases: list[str], on_progress=None) -
     if long_side > max_side:
         ocr_scale = max_side / long_side
         ocr_im = im.resize((max(1, round(w * ocr_scale)), max(1, round(h * ocr_scale))), Image.Resampling.LANCZOS)
-    boxes, counts = _ocr_hit_boxes(ocr_im, phrases, ocr_scale)
+    chosen = _coerce_presets(presets)
+    boxes, counts, p_counts = _ocr_hit_boxes(ocr_im, phrases, ocr_scale, presets=chosen)
     by_phrase = {p: counts[i] for i, p in enumerate(phrases)}
-    hits = sum(counts)
+    hits = sum(counts) + sum(p_counts.values())
     if boxes:
         draw = ImageDraw.Draw(im)
         for x0, y0, x1, y1 in boxes:
@@ -504,9 +647,10 @@ def redact_image(data: bytes, name: str, phrases: list[str], on_progress=None) -
     if on_progress:
         on_progress(1.0)
     return DocResult(
-        data=buf.getvalue(), ext=ext, media_type=media, pages=1, hits=hits, by_phrase=by_phrase, ocr_pages=1,
+        data=buf.getvalue(), ext=ext, media_type=media, pages=1, hits=hits,
+        by_phrase=_with_presets(by_phrase, p_counts), ocr_pages=1,
         preview_jpeg=_preview(im), preview_page=1, width=w, height=h,
-        note=_note(hits, by_phrase, 1, 0, "image"),
+        note=_note(hits, by_phrase, 1, 0, "image", p_counts),
     )
 
 
@@ -526,12 +670,13 @@ def kind_for(name: str) -> str:
     raise DocError("Use a PDF, or an image (JPEG, PNG, WEBP, HEIC, TIFF, BMP).")
 
 
-def redact_file(data: bytes, name: str, phrases: list[str], on_progress=None) -> DocResult:
+def redact_file(data: bytes, name: str, phrases: list[str], on_progress=None, presets=None) -> DocResult:
+    chosen = _coerce_presets(presets)
     if not data:
         raise DocError("That file is empty.")
-    if not phrases:
-        raise DocError("Add at least one keyword or phrase, one per line.")
+    if not phrases and not chosen:
+        raise DocError("Tick a preset or add at least one keyword or phrase, one per line.")
     kind = kind_for(name)
     if kind == "pdf":
-        return redact_pdf(data, phrases, on_progress)
-    return redact_image(data, name, phrases, on_progress)
+        return redact_pdf(data, phrases, on_progress, presets=chosen)
+    return redact_image(data, name, phrases, on_progress, presets=chosen)

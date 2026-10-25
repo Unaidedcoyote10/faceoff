@@ -556,16 +556,28 @@ $('#igCheck').onclick = async () => { try { await api('/api/instagram/check', { 
 /* ---------- docs (keyword redaction; not the face queue) ---------- */
 const DOC_EXT = /\.(pdf|jpe?g|png|webp|heic|heif|tiff?|bmp)$/i;
 let docSig = '', docItems = [];
+const PRESET_LABEL = {names:'Names', money:'Money', addresses:'Addresses', emails:'Emails', phones:'Phone numbers', locations:'Locations'};
 const kwIn = $('#kwIn');
 if (kwIn) {
   kwIn.value = localStorage.getItem('fo.keywords') || '';
   kwIn.addEventListener('input', () => localStorage.setItem('fo.keywords', kwIn.value.slice(0, 4000)));
 }
+const savedPresets = new Set((localStorage.getItem('fo.presets') || '').split(',').filter(Boolean));
+document.querySelectorAll('#presetBox input').forEach(el => {
+  el.checked = savedPresets.has(el.value);
+  el.addEventListener('change', () => {
+    const on = [...document.querySelectorAll('#presetBox input:checked')].map(x => x.value);
+    localStorage.setItem('fo.presets', on.join(','));
+  });
+});
+function selectedPresets() {
+  return [...document.querySelectorAll('#presetBox input:checked')].map(x => x.value);
+}
 function renderDocs() {
   const el = $('#docList');
   if (!el) return;
   if (!docItems.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-ic">▤</div><div>No documents yet.</div><p class="hint">Add keywords, then a PDF or a photo of text.</p></div>';
+    el.innerHTML = '<div class="empty"><div class="empty-ic">▤</div><div>No documents yet.</div><p class="hint">Tick a preset or add a keyword, then a PDF or a photo of text.</p></div>';
     return;
   }
   el.innerHTML = docItems.map(d => {
@@ -573,12 +585,14 @@ function renderDocs() {
     const state = d.status === 'error' ? 'Failed' : ready ? `${d.hits} match${d.hits === 1 ? '' : 'es'}` : (d.progress ? `${Math.round(d.progress * 100)}%` : d.status);
     const pages = d.pages ? ` · ${d.pages} page${d.pages === 1 ? '' : 's'}` : '';
     const ocr = d.ocr_pages ? ` · OCR` : '';
-    const detail = d.error || d.note || (d.keywords || []).join(' · ');
+    const asked = [...(d.presets || []).map(p => PRESET_LABEL[p] || p), ...(d.keywords || [])];
+    const detail = d.error || d.note || asked.join(' · ');
     return `<article class="dcard">
       <div class="dprev">${ready ? `<img src="/api/docs/${d.id}/file/preview?v=${d.v}" alt="">` : `<div class="dph">${d.status === 'error' ? '⚠︎' : '…'}</div>`}</div>
       <div class="dmeta">
         <b title="${esc(d.name)}">${esc(d.name)}</b>
         <div class="hint">${d.kind === 'pdf' ? 'PDF' : 'Image'} · ${esc(state)}${pages}${ocr}${ready && d.preview_page > 1 ? ` · preview p.${d.preview_page}` : ''}</div>
+        ${asked.length ? `<div class="hint">Asked: ${esc(asked.join(' · '))}</div>` : ''}
         <div class="hint">${esc(detail)}</div>
         <div class="dacts">
           ${ready ? `<a class="btn small" href="/api/docs/${d.id}/file/download">Download</a>` : ''}
@@ -597,7 +611,7 @@ async function loadDocs() {
     if (ns !== docSig) { docSig = ns; renderDocs(); }
     if (d.limits && $('#docHint')) {
       const ocr = d.limits.ocr ? 'English OCR is on for scans and photos.' : 'OCR is off — only PDFs with selectable text can be searched.';
-      $('#docHint').textContent = `PDF or image. ${ocr} Up to ${d.limits.max_pages} PDF pages. Black boxes only — faces are not blurred here. A flattened copy goes to the same export folder as photos; the original stays put. OCR can miss handwriting, tiny type, and rotated or non-English text. Review the file.`;
+      $('#docHint').textContent = `PDF or image. ${ocr} Up to ${d.limits.max_pages} PDF pages. Presets and custom lines are combined. Names, addresses, and locations are incomplete guesses. Black boxes only — faces are not blurred here. A flattened copy goes to the same export folder as photos; the original stays put. OCR can miss handwriting, tiny type, and rotated or non-English text. Review the file.`;
     }
     return docPend;
   } catch (e) { return docPend; }
@@ -605,7 +619,8 @@ async function loadDocs() {
 function setDocStatus(t) { const el = $('#docStatus'); if (!el) return; el.textContent = t || ''; el.classList.toggle('hidden', !t); }
 async function takeDocs(files) {
   const words = (kwIn && kwIn.value || '').trim();
-  if (!words) { toast('Add keywords first — one phrase per line'); return; }
+  const presets = selectedPresets();
+  if (!words && !presets.length) { toast('Tick a preset or add a keyword — one phrase per line'); return; }
   const ok = (files || []).filter(f => f && f.size && DOC_EXT.test(f.name || ''));
   if (!ok.length) { toast('Use a PDF or an image of text'); return; }
   let done = 0, bad = 0;
@@ -614,6 +629,7 @@ async function takeDocs(files) {
     const fd = new FormData();
     fd.append('file', f, f.name);
     fd.append('keywords', words);
+    fd.append('presets', presets.join(','));
     try { await api('/api/docs', { method: 'POST', body: fd }); done++; }
     catch (e) { bad++; toast(`${f.name}: ${e.message}`, 4000); }
   }

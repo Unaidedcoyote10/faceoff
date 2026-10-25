@@ -471,7 +471,8 @@ def _doc_name(name: str) -> str:
 def _doc_pub(d: dict) -> dict:
     return {
         "id": d["id"], "created": d["created"], "name": d["name"], "kind": d["kind"], "status": d["status"],
-        "keywords": d.get("keywords") or [], "pages": d.get("pages") or 0, "hits": d.get("hits") or 0,
+        "keywords": d.get("keywords") or [], "presets": d.get("presets") or [],
+        "pages": d.get("pages") or 0, "hits": d.get("hits") or 0,
         "by_phrase": d.get("hit_detail") or {}, "ocr_pages": d.get("ocr_pages") or 0, "note": d.get("note") or "",
         "error": d.get("error"), "exported": os.path.basename(d["export_path"]) if d.get("export_path") else None,
         "preview_page": d.get("preview_page") or 1, "progress": d.get("progress"), "out_ext": d.get("out_ext") or "",
@@ -486,9 +487,13 @@ def docs_list():
 
 
 @app.post("/api/docs")
-async def docs_upload(file: UploadFile = File(...), keywords_text: str = Form("", alias="keywords")):
+async def docs_upload(
+    file: UploadFile = File(...),
+    keywords_text: str = Form("", alias="keywords"),
+    presets_text: str = Form("", alias="presets"),
+):
     try:
-        phrases = keywords.parse_keywords(keywords_text)
+        phrases, chosen = keywords.parse_job(keywords_text, presets_text)
     except keywords.DocError as e:
         raise HTTPException(400, str(e))
     data = await file.read()
@@ -503,7 +508,7 @@ async def docs_upload(file: UploadFile = File(...), keywords_text: str = Form(""
         raise HTTPException(400, str(e))
     if kind == "pdf" and not data.startswith(b"%PDF"):
         raise HTTPException(400, "That file is not a PDF.")
-    id_ = docwork.add(data, name, phrases)
+    id_ = docwork.add(data, name, phrases, chosen)
     return {"id": id_, "status": "queued"}
 
 
