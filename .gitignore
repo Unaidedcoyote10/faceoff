@@ -1,0 +1,38 @@
+# secrets / local config
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+cookies*.txt
+ig_cookie.json
+
+# runtime data & exports (contain personal media)
+data/
+export/
+export-ig/
+export*/
+*.db
+*.sqlite*
+
+# build output
+dist/
+*.zip
+models/*.onnx
+
+# test artefacts / screenshots of real content
+screenshots/
+tests/ext/mock.*
+/tmp/
+
+# python / node / editors
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+node_modules/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

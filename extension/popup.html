@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="ui.css"></head>
+<body><div class="wrap">
+<header><img src="icons/icon48.png" alt=""><b>Faceoff Sync</b><span id="srv">…</span></header>
+<div class="card">
+  <dl class="kv">
+    <dt>Status</dt><dd id="state">–</dd>
+    <dt>Last sync</dt><dd id="last">never</dd>
+    <dt>Next check</dt><dd id="next">–</dd>
+    <dt>Result</dt><dd id="result">–</dd>
+    <dt>Files sent</dt><dd id="sent">0</dd>
+    <dt>IG pages (24 h)</dt><dd id="pages24">0</dd>
+  </dl>
+  <div id="err" class="err" hidden></div>
+</div>
+<div class="row" style="margin-bottom:10px"><button class="pri" id="sync">Sync now</button></div>
+<div class="card">
+  <div class="tog"><span>Auto-check for new saves (every 3–6 h, only while you're using instagram.com)</span><input type="checkbox" id="auto"></div>
+</div>
+<div class="card">
+  <div class="tog"><b>Backfill all saves</b><span class="pill" id="bfPill">idle</span></div>
+  <dl class="kv" style="margin-top:6px">
+    <dt>Pages fetched</dt><dd id="bfPages">0</dd>
+    <dt>Posts queued</dt><dd id="bfPosts">0</dd>
+    <dt>Files sent</dt><dd id="bfSent">0</dd>
+    <dt>Next</dt><dd id="bfNext">–</dd>
+  </dl>
+  <div class="mut" style="margin:6px 0">Off unless allowed in Faceoff Settings. Very slow: 1 page every 45–120 s, only while instagram.com is visible and focused, a 20–40 min cooldown every 10 pages, max 40 pages a day. Any Instagram warning stops everything for 48 h+.</div>
+  <div class="row"><button id="bfGo">Start backfill</button><button id="bfRestart" hidden>Start over</button></div>
+</div>
+<div class="row"><button id="opts">Settings</button><button id="open">Open Faceoff</button></div>
+</div><script src="popup.js"></script></body></html>

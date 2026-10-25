@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+data
+export*
+dist
+screenshots
+models
+**/__pycache__
+.venv
+tests/ext/mock.*

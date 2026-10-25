@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Faceoff">
+<title>Faceoff</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/logo.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="/icons/favicon-32.png?v=2" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
+<link rel="stylesheet" href="/static/style.css?v=logo2">
+</head>
+<body>
+<svg class="fo-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs><linearGradient id="fo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#ec4899"/></linearGradient><symbol id="fo-sil" viewBox="0 0 64 64" overflow="visible"><ellipse cx="32" cy="25" rx="12.5" ry="14.5"/><path d="M10 60c0-13 9.5-19.5 22-19.5S54 47 54 60z"/></symbol><mask id="fo-m" maskUnits="userSpaceOnUse" x="-20" y="-20" width="104" height="104"><rect x="-20" y="-20" width="104" height="104" fill="#fff"/><rect x="-20" y="28.6" width="104" height="4.4" fill="#000"/><rect fill="#000" x="18" y="18.6" width="28" height="5.2" rx="1.2"/></mask><clipPath id="fo-b"><rect x="-20" y="28.6" width="104" height="4.4"/></clipPath><clipPath id="fo-s"><ellipse cx="32" cy="25" rx="12.5" ry="14.5"/><path d="M10 60c0-13 9.5-19.5 22-19.5S54 47 54 60z"/></clipPath></defs></svg>
+<header class="top">
+  <div class="brand"><svg class="fo-mark logo" viewBox="0 0 64 64" role="img" aria-label="Faceoff"><g mask="url(#fo-m)"><g class="gh gc" fill="#22e6ff"><use href="#fo-sil" width="64" height="64"/></g><g class="gh gm" fill="#ff2bd6"><use href="#fo-sil" width="64" height="64"/></g><g class="core" fill="url(#fo-g)"><use href="#fo-sil" width="64" height="64"/></g></g><g clip-path="url(#fo-b)"><g class="band"><g fill="#22e6ff" opacity=".75" transform="translate(-1.5 0)"><use href="#fo-sil" width="64" height="64"/></g><g fill="url(#fo-g)"><use href="#fo-sil" width="64" height="64"/></g></g></g><g clip-path="url(#fo-s)"><rect class="scan" x="-4" y="0" width="72" height="5" fill="#fff"/></g></svg><span class="fo-word" data-t="Faceoff">Face<b>off</b></span></div>
+  <div id="queuePill" class="pill hidden"><span class="spin"></span><span id="queueText">0</span></div>
+</header>
+
+<main>
+  <!-- UPLOAD -->
+  <section id="tab-upload" class="tab active">
+    <div class="hero" aria-label="Faceoff"><svg class="fo-mark big" viewBox="0 0 64 64" role="img" aria-label="Faceoff"><g mask="url(#fo-m)"><g class="gh gc" fill="#22e6ff"><use href="#fo-sil" width="64" height="64"/></g><g class="gh gm" fill="#ff2bd6"><use href="#fo-sil" width="64" height="64"/></g><g class="core" fill="url(#fo-g)"><use href="#fo-sil" width="64" height="64"/></g></g><g clip-path="url(#fo-b)"><g class="band"><g fill="#22e6ff" opacity=".75" transform="translate(-1.5 0)"><use href="#fo-sil" width="64" height="64"/></g><g fill="url(#fo-g)"><use href="#fo-sil" width="64" height="64"/></g></g></g><g clip-path="url(#fo-s)"><rect class="scan" x="-4" y="0" width="72" height="5" fill="#fff"/></g></svg><div class="hero-word fo-word" data-t="Faceoff">Face<b>off</b></div></div>
+    <label id="drop" class="drop" for="fileInput">
+      <input id="fileInput" type="file" accept="image/*,.heic,.heif" multiple>
+      <div class="drop-ic"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0-4.5 4.5M12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="drop-t">Tap to choose photos</div>
+      <div class="drop-s">or drag &amp; drop photos or whole folders</div>
+    </label>
+    <input id="folderInput" type="file" webkitdirectory directory multiple class="hidden">
+    <div class="pick-row">
+      <button class="btn ghost" id="filesBtn" type="button">🖼️ Choose photos</button>
+      <button class="btn ghost" id="folderBtn" type="button">📁 Choose folder</button>
+    </div>
+    <div id="upStatus" class="upstatus hidden"></div>
+    <div class="card">
+      <div class="row between"><span class="lbl">Redaction</span>
+        <div class="seg" id="uploadMode">
+          <button data-v="blur">Blur</button><button data-v="box">Black box</button>
+        </div>
+      </div>
+      <p class="hint">Processed copies auto-export to <code id="exportPath">…</code></p>
+    </div>
+    <div id="batch" class="batch"></div>
+  </section>
+
+  <!-- GALLERY -->
+  <section id="tab-gallery" class="tab">
+    <div class="row between ghead">
+      <div><h2>Gallery</h2><div class="sub" id="gallerySub">Last 100</div></div>
+      <div class="seg small" id="viewMode"><button data-v="before">Before</button><button data-v="after">After</button></div>
+    </div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty hidden">
+      <div class="empty-ic">🫥</div><div>No photos yet.</div><button class="btn" data-goto="upload">Upload some</button>
+    </div>
+  </section>
+
+  <!-- SAVED (Instagram saves from the extension, unprocessed until you choose) -->
+  <section id="tab-saved" class="tab">
+    <div class="row between ghead">
+      <div><h2>Saved</h2><div class="sub" id="savedSub">From Instagram via Faceoff Sync</div></div>
+      <div class="row gap"><div class="seg small" id="savedView"><button data-v="before">Before</button><button data-v="after">After</button></div>
+        <button class="btn ghost small" id="selBtn">Select</button></div>
+    </div>
+    <div class="row between svbar">
+      <div class="seg small" id="savedMode"><button data-v="grid">Posts</button><button data-v="users">By user</button></div>
+      <div class="seg small" id="savedKind"><button data-v="all">All</button><button data-v="image">Photos</button><button data-v="video">Videos</button></div>
+      <select id="savedSort" aria-label="Sort"><option value="newest">Newest saved</option><option value="oldest">Oldest saved</option><option value="owner">By user A–Z</option></select>
+    </div>
+    <div id="ownerChip" class="ownerchip hidden"></div>
+    <div id="usersView" class="hidden">
+      <div class="row gap usearch"><input id="userQ" type="search" placeholder="Search accounts" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <div class="seg small" id="userSort"><button data-v="count">Most</button><button data-v="recent">Recent</button><button data-v="name">A–Z</button></div></div>
+      <div id="userList" class="ulist"></div>
+    </div>
+    <div class="chipbar" id="savedFilters">
+      <button class="feedbtn hidden" id="feedBtn">▶ Watch as feed</button>
+      <button data-f="all" class="on">All <i></i></button>
+      <button data-f="unprocessed">Unprocessed <i></i></button><button data-f="processed">Processed <i></i></button><button data-f="working">Working <i></i></button>
+    </div>
+    <div id="sgrid" class="sgrid"></div>
+    <div id="sMore" class="smore"></div>
+    <div id="sEmpty" class="empty hidden"><div class="empty-ic">🔖</div><div>No saves yet.</div>
+      <p class="hint">Install the Faceoff Sync extension (Settings → Browser extension), then save posts on Instagram.</p></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="tab">
+    <h2>Settings</h2>
+    <div class="card">
+      <div class="card-h">Redaction</div>
+      <div class="row between"><span class="lbl">Default mode</span>
+        <div class="seg" id="setMode"><button data-v="blur">Blur</button><button data-v="box">Black box</button></div></div>
+      <div class="field"><div class="row between"><span class="lbl">Padding around faces</span><span class="val" id="padVal"></span></div>
+        <input type="range" id="setPad" min="0" max="30" step="1"><p class="hint">Small = tight, most of the photo stays untouched.</p></div>
+      <div class="row between"><span class="lbl">Detection sensitivity</span>
+        <div class="seg small" id="setSens"><button data-v="low">Low</button><button data-v="medium">Med</button><button data-v="high">High</button></div></div>
+      <p class="hint">High catches tiny/side faces in crowds; Low avoids any false hits.</p>
+      <div class="field"><div class="row between"><span class="lbl">Blur strength</span><span class="val" id="strVal"></span></div>
+        <input type="range" id="setStr" min="1" max="5" step="1"></div>
+      <div class="row between"><span class="lbl">Auto-export</span><label class="sw"><input type="checkbox" id="setExport"><i></i></label></div>
+      <div class="row between"><span class="lbl">Monthly sub-folders</span><label class="sw"><input type="checkbox" id="setSub"><i></i></label></div>
+      <div class="row between"><span class="lbl">Prefix folder name on exports</span><label class="sw"><input type="checkbox" id="setPrefix"><i></i></label></div>
+      <p class="hint" id="exportStatus"></p>
+      <div class="row between" id="igExpRow"><span class="lbl">Copy raw IG saves to IG folder</span><label class="sw"><input type="checkbox" id="setIgExport"><i></i></label></div>
+      <p class="hint" id="igExportStatus"></p>
+    </div>
+
+    <div class="card" id="extCard">
+      <div class="card-h row between"><span>Browser extension · Faceoff Sync</span><span class="status ok">recommended</span></div>
+      <p class="igmsg">Sends posts you save on Instagram (photos + videos) from your own logged-in Brave/Chrome tab into the <b>Saved</b> tab, unprocessed — pick which photos to blur/box there (videos are kept raw). This server never contacts Instagram and never sees your cookies.</p>
+      <div id="extPause" class="extpause"></div>
+      <dl class="kv" id="extKv"></dl>
+      <div id="extTokBox" class="hidden"><p class="hint">Paste this into the extension's settings (shown once):</p>
+        <div class="row gap"><input id="extTok" readonly class="tok"><button class="btn" id="extCopy">Copy</button></div></div>
+      <div class="row gap"><button class="btn" id="extGen">Generate pairing token</button><a class="btn ghost" href="/api/ext/download" download>Download extension (.zip)</a></div>
+      <p class="hint">Install: unzip → <code>chrome://extensions</code> (or <code>brave://extensions</code>) → Developer mode → Load unpacked → pick the <code>faceoff-sync</code> folder → pin it → paste the token → open instagram.com.</p>
+    </div>
+
+    <div class="card" id="igCard">
+      <div class="card-h row between"><span>Server pull (legacy)</span><span id="igPill" class="status">…</span></div>
+      <p class="hint">Old cookie-based pull from this server. Off by default — use the browser extension above instead.</p>
+      <p id="igMsg" class="igmsg"></p>
+      <dl class="kv" id="igKv"></dl>
+      <div class="row between"><span class="lbl">Auto-pull on schedule</span><label class="sw"><input type="checkbox" id="igEnabled"><i></i></label></div>
+      <div class="row between"><span class="lbl">Every</span>
+        <select id="igInterval"><option value="3">3 hours</option><option value="6">6 hours</option><option value="12">12 hours</option><option value="24">24 hours</option></select></div>
+      <div class="row between"><span class="lbl">Max posts per run</span>
+        <select id="igCap"><option>3</option><option>5</option><option>8</option><option>12</option><option>20</option></select></div>
+      <div class="row between"><span class="lbl">First run</span>
+        <select id="igFirst"><option value="baseline">Only new from now</option><option value="grab">Grab latest 5</option></select></div>
+      <div class="row between"><span class="lbl">Mode for IG posts</span>
+        <select id="igMode"><option value="">Use default</option><option value="blur">Blur</option><option value="box">Black box</option></select></div>
+      <details class="cookie" id="cookieBox">
+        <summary id="cookieSum">Paste session cookie</summary>
+        <p class="hint"><b>Best: paste the full Cookie header.</b> On a computer in Brave/Chrome: open instagram.com (logged in) → DevTools (⌥⌘I / F12) → <b>Network</b> → reload → click any <code>instagram.com</code> request → Headers → Request Headers → copy the whole <b>Cookie:</b> value.</p>
+        <p class="hint">Also accepted: just the <b>sessionid</b> value (Application → Cookies), a cookies.txt export, or a JSON cookie export. Stored only on this server, never shown again.</p>
+        <textarea id="cookieIn" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sessionid=…; csrftoken=…; ds_user_id=…; mid=…; ig_did=…; rur=…"></textarea>
+        <div class="row gap"><button class="btn" id="cookieSave">Save cookie</button><button class="btn ghost danger" id="cookieClear">Remove</button></div>
+      </details>
+      <button class="btn wide" id="igCheck">Check now</button>
+      <p class="hint">Safe by design: jittered schedule, ≥<span id="igFloor">2</span>h floor, small batches, random delays, automatic back-off on rate limits.</p>
+    </div>
+    <p class="foot">Faceoff · self-hosted · <span id="workers"></span></p>
+  </section>
+</main>
+
+<!-- viewer -->
+<div id="viewer" class="viewer hidden" role="dialog">
+  <div class="v-top"><button class="icon" id="vClose" aria-label="Close">✕</button><div class="v-title" id="vTitle"></div><span></span></div>
+  <div class="vidwrap"><video id="vVideo" controls playsinline preload="metadata"></video>
+    <div class="seg small" id="vSide"><button data-v="before">Before</button><button data-v="after">After</button></div></div>
+  <div class="compare" id="cmp">
+    <img id="cmpBefore" alt="before"><div class="after-wrap" id="cmpAfterWrap"><img id="cmpAfter" alt="after"></div>
+    <div class="handle" id="cmpHandle"><span></span></div>
+    <span class="tag l">Before</span><span class="tag r">After</span>
+  </div>
+  <input type="range" id="cmpRange" min="0" max="100" value="50" aria-label="compare">
+  <div class="rawwrap" id="rawWrap"><img id="rawImg" alt=""><video id="rawVid" controls playsinline preload="metadata"></video></div>
+  <div class="v-meta" id="vMeta"></div>
+  <div class="v-actions">
+    <a class="btn" id="vDownload" download>Download</a>
+    <button class="btn" id="vBlur">◌ Blur</button><button class="btn" id="vBox">■ Box</button>
+    <button class="btn ghost" id="vRedo">Redo as box</button>
+    <button class="btn ghost danger" id="vDelete">Remove</button>
+  </div>
+</div>
+
+<div id="feed" class="feed hidden" role="dialog" aria-label="Video feed">
+  <div id="feedScroll" class="feedscroll"></div>
+  <button class="fbtn fclose" id="feedClose" aria-label="Close">✕</button>
+  <button class="fbtn fmute" id="feedMute" aria-label="Sound">🔇</button>
+  <button class="fsave" id="feedSave" aria-label="Save video to this device"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg><span>Save</span></button>
+</div>
+<div id="saveSheet" class="sheet hidden" role="dialog" aria-label="Save to device">
+  <div class="sheetcard">
+    <div class="sh-name" id="ssName"></div>
+    <div class="sh-prog"><i id="ssBar"></i></div>
+    <div class="sh-status" id="ssStatus">Preparing…</div>
+    <button class="btn" id="ssShare" disabled>Save to Photos / Files</button>
+    <a class="lnk sh-alt" id="ssAlt" download>Download to Files instead</a>
+    <button class="lnk sh-x" id="ssClose">Cancel</button>
+  </div>
+</div>
+<div id="selbar" class="selbar hidden">
+  <div class="selrow"><b id="selCount">0 selected</b><button class="lnk" id="selAll">Select all</button><button class="lnk" id="selNone">Clear</button><button class="lnk" id="selDone">Done</button></div>
+  <div class="selrow"><button class="btn" id="selBlur">◌ Blur</button><button class="btn" id="selBox">■ Box</button><button class="btn ghost" id="selSave">⬇ Save</button><button class="btn ghost danger" id="selDel">Delete</button></div>
+</div>
+<div id="toast" class="toast"></div>
+
+<nav class="bottom">
+  <button data-tab="upload" class="active"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 20h14" /></svg><span>Upload</span></button>
+  <button data-tab="gallery"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span>Gallery</span></button>
+  <button data-tab="saved"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4.2-6.5 4.2v-16a1 1 0 0 1 1-1z"/></svg><span>Saved</span></button>
+  <button data-tab="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Settings</span></button>
+</nav>
+<script src="/static/app.js?v=logo2"></script>
+</body>
+</html>

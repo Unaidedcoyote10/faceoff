@@ -1,0 +1,46 @@
+name: faceoff
+services:
+  faceoff:
+    build: .
+    image: faceoff:latest
+    container_name: faceoff
+    restart: unless-stopped
+    ports:
+      - "${FACEOFF_PORT:-8088}:8088"
+    # Run as the user/group that should own exported files (e.g. the owner of a network share).
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      TZ: ${TZ:-UTC}
+      WORKERS: ${WORKERS:-2}              # images processed concurrently (2 suits a Pi 4)
+      CV_THREADS: ${CV_THREADS:-2}        # OpenCV threads per worker
+      DEFAULT_MODE: ${DEFAULT_MODE:-blur}
+      DEFAULT_PADDING: ${DEFAULT_PADDING:-0.08}
+      DEFAULT_SENSITIVITY: ${DEFAULT_SENSITIVITY:-medium}
+      APP_PASSWORD: ${APP_PASSWORD:-}     # set to enable HTTP basic auth (any username unless APP_USER set)
+      APP_USER: ${APP_USER:-}
+      EXPORT_LABEL: ${EXPORT_LABEL:-}     # how the export folder is shown in the UI
+      IG_EXPORT_ENABLED: ${IG_EXPORT_ENABLED:-0}   # 1 = export Instagram/extension items to IG_EXPORT_HOST_DIR
+      IG_EXPORT_LABEL: ${IG_EXPORT_LABEL:-}
+      UMASK: ${UMASK:-002}
+      EXPORT_FILE_MODE: ${EXPORT_FILE_MODE:-664}
+      IG_MIN_INTERVAL_HOURS: ${IG_MIN_INTERVAL_HOURS:-2}
+    volumes:
+      # Originals, previews and the SQLite DB. Keep this private (not on a shared folder).
+      - type: bind
+        source: "${DATA_HOST_DIR:-./data}"
+        target: /data
+      # Processed images are written here automatically.
+      # Set EXPORT_HOST_DIR in .env (spaces are fine, the long bind syntax handles them).
+      - type: bind
+        source: "${EXPORT_HOST_DIR:-./export}"
+        target: /export
+      # Optional: raw Instagram saves from the extension are copied here (IG_EXPORT_ENABLED=1).
+      - type: bind
+        source: "${IG_EXPORT_HOST_DIR:-./export-ig}"
+        target: /export-ig
+        bind:
+          create_host_path: true
+    mem_limit: ${MEM_LIMIT:-1g}
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }

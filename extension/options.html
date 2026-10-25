@@ -1,0 +1,18 @@
+<!doctype html><html class="page"><head><meta charset="utf-8"><title>Faceoff Sync settings</title><link rel="stylesheet" href="ui.css"></head>
+<body><div class="wrap">
+<header><img src="icons/icon48.png" alt=""><b>Faceoff Sync — settings</b></header>
+<div class="card">
+  <label for="url">Faceoff URL</label><input type="url" id="url" placeholder="http://your-server:8088" required>
+  <label for="token">Pairing token (Faceoff → Settings → Browser extension → Generate)</label><input type="password" id="token" autocomplete="off" placeholder="fo_…">
+  <label for="password">Faceoff app password (only if you set APP_PASSWORD)</label><input type="password" id="password" autocomplete="off">
+  <label for="firstSend">On the very first sync, also send my latest N saves (0 = only saves made after installing)</label><input type="number" id="firstSend" min="0" max="20" value="0">
+  <div class="row" style="margin-top:14px"><button class="pri" id="save">Save &amp; test</button></div>
+  <div id="msg" class="mut" style="margin-top:8px"></div>
+</div>
+<div class="card">
+  <b>Privacy</b>
+  <p class="mut">Faceoff Sync reads your saved-posts list inside your own instagram.com tab and sends only the photo/video files plus shortcode, owner, caption snippet and date to your Faceoff server. It never reads, stores or sends your Instagram cookies or password. Your Faceoff server never contacts Instagram.</p>
+  <div class="row"><button id="rebase">Reset "already seen" list</button></div>
+</div>
+<div class="card"><b>Recent activity</b><pre id="logs"></pre></div>
+</div><script src="options.js"></script></body></html>
