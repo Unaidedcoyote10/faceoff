@@ -80,6 +80,8 @@ mkdir -p data export          # or point DATA_HOST_DIR / EXPORT_HOST_DIR elsewhe
 docker compose up -d --build
 ```
 
+[SETUP.md](SETUP.md) is the shorter walkthrough shipped with the Setup Pack: Docker Desktop or a Pi, the first Blur/Box upload, the Docs tab, and optional Faceoff Sync. This file is the full reference.
+
 Open `http://<your-server>:8088` (or the port you set in `FACEOFF_PORT`). On a phone, use *Add to Home Screen* to install it as an app.
 
 To update after pulling new code, run `docker compose up -d --build`. Your data and exports live in the mounted folders and are not affected.
@@ -160,12 +162,20 @@ The extension (Manifest V3) is in [`extension/`](extension/). The server also se
 
 ### Pair it with your server
 
-1. In Faceoff, go to **Settings → Browser extension → Generate pairing token**. The token is shown once and can be rotated or revoked at any time.
+1. In Faceoff, go to **Settings → Browser extension → Generate pairing token**. The token is shown once. Rotate it in Settings whenever you want; the previous token stops working at once. There is no cookie field.
 2. The extension's options page opens on install. Enter **your Faceoff URL** (for example `http://my-server:8088`; there is no built-in default) and paste the token.
 3. Click **Save & test**. The browser asks for permission to reach that address — including when it is the address you always use. Choose **Allow**. Sync now cannot call Faceoff without that host access, and the options page does not save until it is granted.
 4. Sync starts **paused**. When you're ready, press **Resume** in Faceoff Settings.
 
 **Sync now** stays disabled, with a **not paired** status, until both a Faceoff URL and a pairing token are saved. A blank URL stored by an older install is treated as "not set" and does not wipe a configured address.
+
+### Sync now
+
+**Sync now** is on the extension popup, not in the Faceoff tabs.
+
+- The button stays disabled, and the status stays **not paired**, until both the Faceoff URL and a pairing token are saved. If you dismiss the host-access prompt, nothing is stored. Click **Save & test** again and choose **Allow**. Until then the popup result says `Not paired — open Settings, paste a Faceoff token, Save, and Allow access`.
+- If Faceoff still shows **Instagram sync PAUSED**, press **Resume** first. Sync now checks that flag and does nothing while it is paused.
+- An instagram.com tab must be open and **visible**, then press **Sync now**. If none is visible, the result line says `Open instagram.com (visible), then press Sync now`. Sync now does not need the tab to be focused. The extension never opens a tab by itself.
 
 ### If Sync now does nothing
 
@@ -173,14 +183,14 @@ Re-pair the unpacked extension (reload it from `chrome://extensions` or `brave:/
 
 1. Generate a pairing token in Faceoff **Settings → Browser extension**.
 2. Paste it in the extension options, with your Faceoff URL (the default address or a custom one).
-3. Click **Save & test** and allow host access if the browser prompts.
+3. Click **Save & test** and choose **Allow** if the browser prompts. The options page does not save until that access is granted.
 4. Open a visible instagram.com tab (logged in), then open the popup and press **Sync now**.
 
 ### How syncing works (and how it stays gentle)
 
-- The extension only makes Instagram requests while an instagram.com tab is **visible and focused**. It never opens tabs by itself. Requests are same-origin calls from that tab, the same ones instagram.com makes.
+- **Sync now** needs an instagram.com tab that is open and visible. Automatic checks and backfill go further: they only make Instagram requests while that tab is **visible and focused**. The extension never opens tabs by itself. Requests are same-origin calls from that tab, the same ones instagram.com makes.
 - **Before every Instagram request** it checks Faceoff's **pause flag** (`GET /api/ext/control`). If the server is paused or unreachable, it does nothing.
-- **New saves:** the first run only records what's already saved. After that it checks the first page every 3–6 hours, with jitter.
+- **New saves:** the first run only records what's already saved, unless **On the very first sync, also send my latest N saves** on the extension options page is above 0 (at most 10 are sent from that first page). After that it checks the first page every 3–6 hours, with jitter. The popup can turn this auto-check off.
 - **Backfill** of older saves is **off** unless you enable it in Settings. When on, it takes one page every 45–120 s, a 20–40 min break every 10 pages, and at most 40–50 pages per 24 h. Media downloads happen one at a time.
 - On any warning from Instagram (rate limit, "automated behaviour", challenge, login wall, unexpected response), it **stops for 48 h or more**. It also reports the warning, which **pauses Faceoff server-side** until you resume it.
 - Faceoff dedupes by `shortcode:index`, so nothing is sent twice.
@@ -195,7 +205,7 @@ Use it at your own risk. Automated access may be against Instagram's terms; the 
 - **Saved tab:** browse Instagram saves by post or by account. *Select* items, then Blur / Box (photos), Save, or Delete. *▶ Watch as feed* opens the video feed.
 - **Settings:**
   - redaction defaults and export options;
-  - extension pairing, pause/resume, and backfill toggle (Instagram sync is extension-only);
+  - extension pairing, pause/resume, and the backfill toggle (Instagram sync is extension-only; **Sync now** is on the extension popup);
   - an optional raw IG copy.
 
 ### Instagram sync is extension-only
@@ -323,7 +333,7 @@ While sync is paused, `POST /api/ingest` and `/api/ingest/known` return `423 Loc
 ## Security and privacy notes
 
 - **Extension-only Instagram sync.** The server never contacts Instagram and never accepts a session cookie or sessionid. The extension never reads or sends cookies; it uses the logged-in tab's own same-origin requests. Media goes from Instagram's CDN to your browser to your Faceoff server, and nowhere else.
-- **Pairing token.** A random token authorizes the extension and is stored server-side in `/data`. Rotate or revoke it in Settings; revoking it instantly cuts the extension off.
+- **Pairing token.** A random token authorizes the extension and is stored server-side in `/data`. Rotate it in Settings; the previous token stops working at once. `DELETE /api/ext/token` clears it without issuing a new one.
 - **Server-side pause flag.** One switch in Settings stops all extension activity before its next request. Warnings reported by the extension flip it automatically. New installs start paused.
 - **Metadata.** Exported photos have EXIF/GPS stripped. Originals stay in `/data`, so treat that folder as private.
 - **Exposure.** Faceoff is built for a private network. If you expose it, put it behind HTTPS and set `APP_PASSWORD`.
@@ -348,10 +358,11 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 app/            FastAPI app (main.py), face redaction (redact.py), document redaction (keywords.py, presets.py, docwork.py),
                 queue (worker.py), SQLite store (store.py), Saved library (saved.py), static UI (static/)
 extension/      Faceoff Sync MV3 extension (background.js, cfg.js, content.js, popup, options, icons)
-scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip)
+scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip for the extension only)
 tools/          logo geometry + icon generator
 tests/          tests, mocks and public-domain sample images
-Dockerfile, docker-compose.yml, .env.example
+SETUP.md        Short Setup Pack walkthrough (Docker, first upload, Docs, extension)
+Dockerfile, docker-compose.yml, .env.example, README.md
 ```
 
 ## License and credits
