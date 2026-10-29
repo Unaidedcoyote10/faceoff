@@ -8,8 +8,7 @@
 //  * Any warning sign (429, challenge/checkpoint, login_required, redirect, non-JSON, unexpected status) => stop for
 //    48 h (72 h for challenges) locally AND tell Faceoff, which pauses everything until you resume it.
 //  * Media downloads one at a time, 1.5–4 s apart. Never reads/sends Instagram cookies.
-const DEFAULT_URL = "";   // no built-in server: set your Faceoff URL in the extension options
-const DEF_CFG = {url: DEFAULT_URL, password: "", token: "", auto: true, firstSend: 0};
+importScripts("cfg.js");
 const FLOOR = {page_min_s: 45, page_max_s: 120, pages_per_day: 50, new_check_min_h: 3, new_check_max_h: 6, stop_hours: 24};
 const NEW_PER_RUN = 20, COOLDOWN_EVERY = 10, COOLDOWN_MIN = 20 * 60e3, COOLDOWN_JITTER = 20 * 60e3;
 const SEEN_MAX = 8000;
@@ -19,7 +18,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const now = () => Date.now();
 const get = (k) => chrome.storage.local.get(k);
 const set = (o) => chrome.storage.local.set(o);
-async function cfg() { return {...DEF_CFG, ...((await get("cfg")).cfg || {})}; }
+async function cfg() { return mergeCfg((await get("cfg")).cfg); }
 async function patch(key, delta) { const cur = (await get(key))[key] || {}; const n = {...cur, ...delta}; await set({[key]: n}); return n; }
 const setStatus = (d) => patch("status", d);
 async function log(line) {
@@ -249,7 +248,7 @@ async function runBackfill(tabId) {
 async function onActive(tabId) {
   const c = await cfg();
   const {nextAuto = 0} = await get("nextAuto");
-  if (c.auto && c.token && now() >= nextAuto) await syncNew(tabId, "auto");
+  if (c.auto && c.url && c.token && now() >= nextAuto) await syncNew(tabId, "auto");
   const b = await bf();
   if (b.active && !(b.pausedUntil > now() + 1000)) await runBackfill(tabId);
 }
@@ -303,7 +302,7 @@ chrome.runtime.onInstalled.addListener(async (d) => {
     await patch("bf", {active: false, reason: "stopped by v2 update — re-enable in Faceoff Settings to continue slowly", pausedUntil: 0});
     await set({nextAuto: now() + rnd(3, 6) * 3600e3});
   }
-  if (!c.token) chrome.runtime.openOptionsPage();
+  if (!c.url || !c.token) chrome.runtime.openOptionsPage();
 });
 chrome.runtime.onStartup.addListener(ensureAlarms);
 ensureAlarms();

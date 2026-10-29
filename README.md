@@ -162,8 +162,19 @@ The extension (Manifest V3) is in [`extension/`](extension/). The server also se
 
 1. In Faceoff, go to **Settings → Browser extension → Generate pairing token**. The token is shown once and can be rotated or revoked at any time.
 2. The extension's options page opens on install. Enter **your Faceoff URL** (for example `http://my-server:8088`; there is no built-in default) and paste the token.
-3. Click **Save & test**. The browser asks for permission to reach that one address. Accept it.
+3. Click **Save & test**. The browser asks for permission to reach that address — including when it is the address you always use. Choose **Allow**. Sync now cannot call Faceoff without that host access, and the options page does not save until it is granted.
 4. Sync starts **paused**. When you're ready, press **Resume** in Faceoff Settings.
+
+**Sync now** stays disabled, with a **not paired** status, until both a Faceoff URL and a pairing token are saved. A blank URL stored by an older install is treated as "not set" and does not wipe a configured address.
+
+### If Sync now does nothing
+
+Re-pair the unpacked extension (reload it from `chrome://extensions` or `brave://extensions` after updating):
+
+1. Generate a pairing token in Faceoff **Settings → Browser extension**.
+2. Paste it in the extension options, with your Faceoff URL (the default address or a custom one).
+3. Click **Save & test** and allow host access if the browser prompts.
+4. Open a visible instagram.com tab (logged in), then open the popup and press **Sync now**.
 
 ### How syncing works (and how it stays gentle)
 
@@ -327,6 +338,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 |---|---|---|
 | `tests/ingest_test.py` | Pairing and token auth, CORS, the pause flag (423 while paused, auto-pause on report), ingest → Saved, dedupe, raw IG export layout, thumbnails, Range/416, download attachment headers, processing → export folder, gallery integration and pruning | `DATA_DIR=/tmp/fo EXPORT_DIR=/tmp/fo/x IG_EXPORT_ENABLED=1 IG_EXPORT_DIR=/tmp/fo/ig GALLERY_LIMIT=3 python -m tests.ingest_test` |
 | `tests/docs_redact_test.py` | Keyword parsing, preset detection (email, phone, money, address, name, location) and its known misses, whole-word PDF redaction (text layer removed, kept words still visible), presets combined with a custom line, scanned-page OCR when Tesseract is installed, export filename, original bytes untouched, Docs kept out of the photo gallery | `python -m tests.docs_redact_test` |
+| `tests/ext/cfg_merge_test.py` | Blank stored URL/token do not override the default Faceoff URL; a default origin and a custom origin both produce a host-permission pattern; the options page requests that permission before it reads storage. | `python3 tests/ext/cfg_merge_test.py` |
 | `tests/ext/e2e_extension.py` + `tests/ext/mock_ig.py` | Loads the unpacked extension in Chromium against a local HTTPS mock of instagram.com and its CDN. Covers zero requests while paused, baseline, the 3–6 h schedule, backfill gated by the server, a single paced page, and a 429 triggering a 48 h stop plus server auto-pause. | start Faceoff on `127.0.0.1:8088`, run `python3 tests/ext/mock_ig.py`, then `python3 tests/ext/e2e_extension.py` (needs Playwright + Chromium; the mock creates its own throwaway TLS cert) |
 | `tests/*_shots.py` | Phone-width UI checks with Playwright (feed, by-user, save, logo, folder drop) against a running instance with some data | `python3 tests/save_shots.py http://localhost:8088 /tmp/shots` |
 
@@ -335,7 +347,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 ```
 app/            FastAPI app (main.py), face redaction (redact.py), document redaction (keywords.py, presets.py, docwork.py),
                 queue (worker.py), SQLite store (store.py), Saved library (saved.py), static UI (static/)
-extension/      Faceoff Sync MV3 extension (background.js, content.js, popup, options, icons)
+extension/      Faceoff Sync MV3 extension (background.js, cfg.js, content.js, popup, options, icons)
 scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip)
 tools/          logo geometry + icon generator
 tests/          tests, mocks and public-domain sample images

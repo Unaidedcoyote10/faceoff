@@ -29,7 +29,7 @@ with sync_playwright() as p:
     sw = ctx.service_workers[0] if ctx.service_workers else ctx.wait_for_event("serviceworker", timeout=15000)
     eid = sw.url.split("/")[2]
     st = lambda k: sw.evaluate(f"chrome.storage.local.get('{k}').then(r => r['{k}'])")
-    check("v2 loaded", sw.evaluate("chrome.runtime.getManifest().version") == "2.0.0")
+    check("v2 loaded", sw.evaluate("chrome.runtime.getManifest().version") == "2.0.1")
     # configure like the options page would (headless Chromium can't click the host-permission prompt)
     sw.evaluate(f"chrome.storage.local.get('cfg').then(r => chrome.storage.local.set({{cfg: {{...(r.cfg || {{}}), url: 'http://127.0.0.1:8088', token: '{token}', auto: true, firstSend: 0}}}}))")
     ctl = sw.evaluate("fo('/api/ext/control')")
