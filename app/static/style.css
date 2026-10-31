@@ -161,9 +161,11 @@ nav.bottom button{min-width:0}
 .feed{position:fixed;inset:0;z-index:60;background:#000}
 .feedscroll{position:absolute;inset:0;overflow-y:scroll;scroll-snap-type:y mandatory;overscroll-behavior:contain;scrollbar-width:none}
 .feedscroll::-webkit-scrollbar{display:none}
-.slide{position:relative;height:100%;height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;display:grid;place-items:center;overflow:hidden;background:#000 center/cover no-repeat}
+.slide{position:relative;height:100%;height:100dvh;scroll-snap-align:start;scroll-snap-stop:always;display:grid;grid-template-rows:minmax(0,1fr);place-items:center;overflow:hidden;background:#000 center/cover no-repeat}
 .slide::before{content:"";position:absolute;inset:0;backdrop-filter:blur(30px) brightness(.45);-webkit-backdrop-filter:blur(30px) brightness(.45)}
-.slide video{position:relative;width:100%;height:100%;object-fit:contain;background:transparent}
+/* min-width/height:0 lets the grid item shrink. Without it a 9:16 video at width:100%
+   sizes to its intrinsic height, overflows the slide, and overflow:hidden crops it (zoomed on desktop). */
+.slide video{position:relative;width:100%;height:100%;min-width:0;min-height:0;max-width:100%;max-height:100%;object-fit:contain;background:transparent}
 .slide .meta{position:absolute;left:14px;right:70px;bottom:calc(22px + var(--safe-b));text-shadow:0 1px 3px rgba(0,0,0,.8);font-size:14px;line-height:1.35;pointer-events:none}
 .slide .meta>*{pointer-events:auto}
 .slide .who{background:none;border:0;color:#fff;font:800 16px inherit;font-family:inherit;padding:0;cursor:pointer}
