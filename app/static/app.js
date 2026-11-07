@@ -30,6 +30,7 @@ function go(tab) {
   if (tab === 'gallery') loadGallery();
   if (tab === 'settings') loadSettings();
   if (tab === 'docs') loadDocs();
+  if (tab === 'gather') gatherOpen(); else gatherLeave();
   if (tab === 'saved') savedOpen(); else savedLeave();
   window.scrollTo({ top: 0 });
 }
@@ -151,6 +152,7 @@ function tile(it) {
   const ready = it.status === 'done';
   const vid = it.kind === 'video';
   const chips = [it.ig || it.source === 'saved' ? `<span class="chip ig">IG${it.ig && it.ig.owner ? ' @' + esc(it.ig.owner) : ''}</span>` : '',
+    it.source === 'url' ? '<span class="chip">URL</span>' : '',
     vid ? `<span class="chip">▶ ${it.duration ? fmtDur(it.duration) : 'video'}</span>` : '',
     ready ? `<span class="chip">${it.faces} face${it.faces === 1 ? '' : 's'}</span>` : '',
     ready ? `<span class="chip">${it.mode === 'box' ? '■ box' : '◌ blur'}</span>` : '',
@@ -213,7 +215,8 @@ function openViewer(it) {
   else { $('#cmpBefore').src = `/api/images/${it.id}/file/before?v=${it.v}`; $('#cmpAfter').src = `/api/images/${it.id}/file/after?v=${it.v}`; }
   $('#vTitle').textContent = it.name || `#${it.id}`;
   $('#vMeta').textContent = [`${it.faces} face${it.faces === 1 ? '' : 's'}`, it.mode === 'box' ? 'black box' : 'blur',
-    it.width ? `${it.width}×${it.height}` : '', vid && it.duration ? fmtDur(it.duration) : '', it.exported ? `exported → ${it.exported}` : 'not exported', it.ig ? `IG @${it.ig.owner}` : ''].filter(Boolean).join(' · ') + (vid ? ' · faces = most in one frame' : '');
+    it.width ? `${it.width}×${it.height}` : '', vid && it.duration ? fmtDur(it.duration) : '', it.exported ? `exported → ${it.exported}` : 'not exported', it.ig ? `IG @${it.ig.owner}` : '',
+    it.ref && it.ref.page ? `from ${String(it.ref.page).replace(/^https?:\/\//, '').slice(0, 90)}` : ''].filter(Boolean).join(' · ') + (vid ? ' · faces = most in one frame' : '');
   $('#vDownload').href = `/api/images/${it.id}/file/full?v=${it.v}`; vDl = () => saveImage(it);
   $('#vRedo').textContent = it.mode === 'blur' ? 'Redo as box' : 'Redo as blur';
   setX(50); document.body.style.overflow = 'hidden';
@@ -613,6 +616,72 @@ $('#docList').addEventListener('click', async e => {
   try { await api('/api/docs/' + b.dataset.del, { method: 'DELETE' }); toast('Removed. Export kept.'); loadDocs(); }
   catch (err) { toast(err.message, 4000); }
 });
+
+/* ---------- personal URL gatherer ---------- */
+let gatherMode = null;
+const GV = { active: false, timer: 0, modeSet: false };
+function gatherLeave() { GV.active = false; clearTimeout(GV.timer); }
+function gatherCaps(caps) {
+  if (!caps) return;
+  $('#gatherCaps').textContent = `Same-site pages only. Depth ${caps.max_depth}, ${caps.max_pages} pages, ${caps.max_images} images, ${caps.delay_s}s between requests. Skips Instagram. No login.`;
+}
+function gatherRender(d) {
+  gatherCaps(d.caps);
+  if (!GV.modeSet && d.default_mode) { gatherMode = d.default_mode; seg($('#gatherMode'), gatherMode, v => gatherMode = v); GV.modeSet = true; }
+  const job = d.job;
+  const running = job && (job.status === 'running' || job.status === 'cancelling');
+  $('#gatherStart').disabled = !!running;
+  $('#gatherStop').disabled = !running;
+  $('#gatherIn').disabled = !!running;
+  $('#gatherLive').classList.toggle('hidden', !job);
+  if (!job) { $('#gatherList').innerHTML = ''; return running; }
+  const label = { running: 'Running', cancelling: 'Stopping', cancelled: 'Stopped', done: 'Finished', error: 'Error' }[job.status] || job.status;
+  $('#gatherState').textContent = label;
+  $('#gatherState').className = 'status ' + (job.status === 'error' ? 'bad' : job.status === 'done' ? 'ok' : job.status === 'running' ? 'warn' : '');
+  $('#gatherNote').textContent = job.note || label;
+  const cap = d.caps || {};
+  $('#gPages').textContent = cap.max_pages ? `${job.pages} / ${cap.max_pages}` : String(job.pages);
+  $('#gFound').textContent = String(job.images_found);
+  $('#gIn').textContent = cap.max_images ? `${job.images_ingested} / ${cap.max_images}` : String(job.images_ingested);
+  $('#gSkip').textContent = String(job.images_skipped);
+  $('#gatherErrs').innerHTML = (job.errors || []).map(e => `<li>${e.url ? `<b>${esc(e.url)}</b> — ` : ''}${esc(e.error)}</li>`).join('');
+  const rows = (job.ingested || []).slice().reverse();
+  $('#gatherList').innerHTML = rows.map(it => {
+    const page = it.page || it.image || '';
+    const href = /^https?:\/\//i.test(page) ? page : '';
+    const thumb = it.saved_id ? `/api/saved/${it.saved_id}/file/thumb` : '';
+    const label = esc(String(page).replace(/^https?:\/\//, ''));
+    return `<div class="grow">${thumb ? `<img src="${thumb}" alt="" loading="lazy">` : ''}<div class="gt">
+      ${href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${label}</a>` : `<b>${label}</b>`}
+      ${it.image && it.image !== page ? `<div class="hint">${esc(it.image)}</div>` : ''}</div></div>`;
+  }).join('');
+  return running;
+}
+async function gatherRefresh() {
+  try { const d = await api('/api/gather'); return gatherRender(d); }
+  catch (e) { return false; }
+}
+async function gatherTick() {
+  clearTimeout(GV.timer);
+  if (!GV.active) return;
+  const running = await gatherRefresh();
+  if (running) GV.timer = setTimeout(gatherTick, 1200);
+}
+async function gatherOpen() { GV.active = true; await gatherTick(); }
+$('#gatherStart').onclick = async () => {
+  const urls = $('#gatherIn').value;
+  if (!urls.trim()) { toast('Paste at least one URL'); return; }
+  try {
+    const d = await api('/api/gather', { method: 'POST', body: JSON.stringify({ urls, mode: gatherMode || '' }) });
+    gatherRender(d);
+    if (d.job && (d.job.status === 'running' || d.job.status === 'cancelling')) { GV.active = true; gatherTick(); toast('Gathering…'); }
+    else toast(d.job && d.job.note ? d.job.note : 'Nothing to fetch');
+  } catch (e) { toast(e.message, 4000); }
+};
+$('#gatherStop').onclick = async () => {
+  try { const d = await api('/api/gather/cancel', { method: 'POST' }); gatherRender(d); toast('Stopping…'); GV.active = true; gatherTick(); }
+  catch (e) { toast(e.message, 4000); }
+};
 
 /* ---------- boot ---------- */
 loadSettings().catch(() => {});

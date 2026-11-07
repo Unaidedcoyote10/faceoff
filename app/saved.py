@@ -26,6 +26,8 @@ IMG_EXT = {b"\xff\xd8": ".jpg", b"\x89P": ".png", b"RI": ".webp"}
 def _ext_for(data: bytes, kind: str) -> str:
     if kind == "video":
         return ".mp4"
+    if data[:3] == b"GIF":
+        return ".gif"
     if data[4:12] in (b"ftypheic", b"ftypheix", b"ftypmif1"):
         return ".heic"
     return IMG_EXT.get(data[:2], ".jpg")
@@ -77,10 +79,18 @@ def _raw_export(rec: dict, src: str) -> str | None:
     return path
 
 
-def add(data: bytes, key: str, shortcode: str, idx: int, owner: str, caption: str, taken_at, kind: str) -> int:
+def add(data: bytes, key: str, shortcode: str, idx: int, owner: str, caption: str, taken_at, kind: str, *,
+        source: str = "extension", page_url: str | None = None, image_url: str | None = None,
+        raw_export: bool | None = None) -> int:
     ext = _ext_for(data, kind)
+    if raw_export is None:
+        raw_export = source != "url"
     rec = dict(key=key, shortcode=shortcode, idx=idx, owner=owner, caption=caption, taken_at=taken_at,
-               saved_at=time.time(), kind=kind, ext=ext, size=len(data))
+               saved_at=time.time(), kind=kind, ext=ext, size=len(data), source=source or "extension")
+    if page_url:
+        rec["page_url"] = page_url[:1000]
+    if image_url:
+        rec["image_url"] = image_url[:1000]
     sid = store.saved_insert(**rec)
     rec["id"] = sid
     p = store.saved_paths(sid, ext)
@@ -94,10 +104,11 @@ def add(data: bytes, key: str, shortcode: str, idx: int, owner: str, caption: st
             store.saved_update(sid, width=w, height=h)
     except Exception as e:
         log.warning("saved #%s: thumbnail failed: %s", sid, e)
-    try:
-        store.saved_update(sid, raw_export_path=_raw_export(rec, p["original"]))
-    except Exception as e:
-        log.warning("saved #%s: raw export failed: %s", sid, e)
+    if raw_export:
+        try:
+            store.saved_update(sid, raw_export_path=_raw_export(rec, p["original"]))
+        except Exception as e:
+            log.warning("saved #%s: raw export failed: %s", sid, e)
     return sid
 
 
@@ -114,9 +125,17 @@ def process(sid: int, mode: str):
         store.update_image(r["image_id"], mode=mode, status="queued", error=None, padding=None, sensitivity=None)
         worker.enqueue(r["image_id"])
         return r["image_id"]
-    name = f"{_slug(r['owner'] or 'ig')}_{_slug(r['shortcode'])}_{r['idx']}"
-    id_ = store.insert_image(source="saved", orig_name=name, mode=mode, kind=r["kind"], ig_shortcode=r["shortcode"],
-                             ig_owner=r["owner"], caption=r["caption"], taken_at=r["taken_at"], ext_key=r["key"])
+    if (r.get("source") or "") == "url":
+        # Same queue as a Saved Blur/Box. source "url" is not an Instagram label, and
+        # worker._export still writes it to the export folder (Drop).
+        leaf = (r.get("image_url") or "ref").split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+        name = _slug(leaf) or "ref"
+        caption = ((r.get("page_url") or "") + "\n" + (r.get("image_url") or ""))[:500]
+        id_ = store.insert_image(source="url", orig_name=name, mode=mode, kind=r["kind"], caption=caption, ext_key=r["key"])
+    else:
+        name = f"{_slug(r['owner'] or 'ig')}_{_slug(r['shortcode'])}_{r['idx']}"
+        id_ = store.insert_image(source="saved", orig_name=name, mode=mode, kind=r["kind"], ig_shortcode=r["shortcode"],
+                                 ig_owner=r["owner"], caption=r["caption"], taken_at=r["taken_at"], ext_key=r["key"])
     src = store.saved_paths(sid, r["ext"])["original"]
     dst = store.file_paths(id_)["original"]
     try:
@@ -137,4 +156,5 @@ def pub(r: dict) -> dict:
     return {"id": r["id"], "shortcode": r["shortcode"], "index": r["idx"], "owner": r["owner"],
             "caption": (r["caption"] or "")[:160], "taken_at": r["taken_at"], "saved_at": r["saved_at"], "kind": r["kind"],
             "width": r["width"], "height": r["height"], "duration": r["duration"], "size": r["size"],
-            "raw_exported": bool(r["raw_export_path"]), "ext": r["ext"], "proc": proc}
+            "raw_exported": bool(r["raw_export_path"]), "ext": r["ext"], "source": r.get("source") or "extension",
+            "page_url": r.get("page_url") or "", "image_url": r.get("image_url") or "", "proc": proc}

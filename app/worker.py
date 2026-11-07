@@ -84,6 +84,8 @@ def ig_export_status() -> dict:
 
 
 def _target_dir(rec: dict, settings: dict) -> str | None:
+    # "url" is a gathered reference, not an Instagram save. It uses this same export
+    # folder (Drop) as uploads and photos you process from Saved. There is no second copy step.
     if rec["source"] in IG_SOURCES:
         # Instagram-sourced items: own IG folder, or not exported at all
         if not (IG_EXPORT_ENABLED and settings.get("ig_export", True)):

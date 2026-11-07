@@ -15,7 +15,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import docwork, keywords, redact, saved, store, worker
+from . import docwork, gather, keywords, redact, saved, store, worker
 
 APP_NAME = "Faceoff"
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -79,13 +79,14 @@ def startup():
     store.save_settings({})  # rewrite settings so retired server-pull keys are dropped
     worker.resume()
     docwork.resume()
+    gather.recover()
     log.info("%s ready. data=%s export=%s workers=%s auth=%s ocr=%s", APP_NAME, store.DATA_DIR, worker.EXPORT_DIR,
              worker.WORKERS, "on" if APP_PASSWORD else "off", "on" if keywords.ocr_available() else "off")
 
 
 def _pub(r: dict) -> dict:
     v = int(r.get("processed_at") or 0)
-    return {
+    out = {
         "id": r["id"], "created": r["created"], "source": r["source"], "name": r["orig_name"], "mode": r["mode"],
         "status": r["status"], "faces": r["faces"], "boxes": r["boxes"], "error": r["error"],
         "width": r["width"], "height": r["height"],
@@ -95,6 +96,10 @@ def _pub(r: dict) -> dict:
         "kind": r.get("kind") or "image", "duration": r.get("duration"), "progress": r.get("progress"),
         "v": v,
     }
+    if r.get("source") == "url":
+        page, _, image = (r.get("caption") or "").partition("\n")
+        out["ref"] = {"page": page, "image": image}
+    return out
 
 
 @app.get("/api/health")
@@ -402,13 +407,13 @@ def saved_file(sid: int, kind: str):
             raise HTTPException(404, "No thumbnail")
         return FileResponse(p["thumb"], media_type="image/jpeg", headers=headers)
     if kind == "original":
-        mt = "video/mp4" if r["kind"] == "video" else {".png": "image/png", ".webp": "image/webp", ".heic": "image/heic"}.get(r["ext"], "image/jpeg")
+        mt = "video/mp4" if r["kind"] == "video" else {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".heic": "image/heic"}.get(r["ext"], "image/jpeg")
         if r["ext"] == ".heic":  # browsers can't show HEIC: serve a JPEG preview
             img = redact.load_image(open(p["original"], "rb").read())
             return Response(redact.thumbnail(img, 1600), media_type="image/jpeg", headers=headers)
         return FileResponse(p["original"], media_type=mt, headers=headers)
     if kind == "download":   # untouched original as an attachment (Range still works); download-to-device only
-        mt = "video/mp4" if r["kind"] == "video" else {".png": "image/png", ".webp": "image/webp", ".heic": "image/heic"}.get(r["ext"], "image/jpeg")
+        mt = "video/mp4" if r["kind"] == "video" else {".png": "image/png", ".webp": "image/webp", ".gif": "image/gif", ".heic": "image/heic"}.get(r["ext"], "image/jpeg")
         headers["Content-Disposition"] = _attachment(_dl_name(r["owner"], r["shortcode"], r["idx"], r["ext"] or (".mp4" if r["kind"] == "video" else ".jpg")))
         return FileResponse(p["original"], media_type=mt, headers=headers)
     raise HTTPException(404, "Unknown file")
@@ -431,6 +436,28 @@ async def saved_delete(request: Request):
     ids = [int(i) for i in (body.get("ids") or [])][:20000]
     n = sum(1 for i in ids if store.saved_delete(i))
     return {"deleted": n}
+
+
+# ---------------------------------------------------------------- Personal URL gatherer (not Instagram)
+@app.get("/api/gather")
+def gather_status():
+    return gather.view()
+
+
+@app.post("/api/gather")
+async def gather_start(request: Request):
+    body = await request.json()
+    try:
+        return gather.start(body.get("urls") if isinstance(body, dict) else "", (body.get("mode") if isinstance(body, dict) else "") or "")
+    except gather.Busy:
+        raise HTTPException(409, "A gather is already running.")
+    except gather.BadInput as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/gather/cancel")
+def gather_cancel():
+    return gather.cancel()
 
 
 # ---------------------------------------------------------------- Document keyword redaction (separate from face blur/box)
