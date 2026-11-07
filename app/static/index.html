@@ -13,7 +13,7 @@
 <link rel="icon" href="/icons/logo.svg?v=2" type="image/svg+xml">
 <link rel="icon" href="/icons/favicon-32.png?v=2" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
-<link rel="stylesheet" href="/static/style.css?v=ext2">
+<link rel="stylesheet" href="/static/style.css?v=gather1">
 </head>
 <body>
 <svg class="fo-defs" width="0" height="0" aria-hidden="true" focusable="false"><defs><linearGradient id="fo-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#ec4899"/></linearGradient><symbol id="fo-sil" viewBox="0 0 64 64" overflow="visible"><ellipse cx="32" cy="25" rx="12.5" ry="14.5"/><path d="M10 60c0-13 9.5-19.5 22-19.5S54 47 54 60z"/></symbol><mask id="fo-m" maskUnits="userSpaceOnUse" x="-20" y="-20" width="104" height="104"><rect x="-20" y="-20" width="104" height="104" fill="#fff"/><rect x="-20" y="28.6" width="104" height="4.4" fill="#000"/><rect fill="#000" x="18" y="18.6" width="28" height="5.2" rx="1.2"/></mask><clipPath id="fo-b"><rect x="-20" y="28.6" width="104" height="4.4"/></clipPath><clipPath id="fo-s"><ellipse cx="32" cy="25" rx="12.5" ry="14.5"/><path d="M10 60c0-13 9.5-19.5 22-19.5S54 47 54 60z"/></clipPath></defs></svg>
@@ -48,6 +48,37 @@
       <p class="hint">Photos only — this blurs or boxes faces. To black out words in a PDF or a photo of text, use Docs.</p>
     </div>
     <div id="batch" class="batch"></div>
+  </section>
+
+  <!-- GATHER (personal URL crawl — not Instagram) -->
+  <section id="tab-gather" class="tab">
+    <div class="ghead">
+      <div><h2>Gather</h2><div class="sub">Personal. Paste page links. Reference images go through the usual auto-process into the export folder.</div></div>
+    </div>
+    <div class="card">
+      <label class="lbl" for="gatherIn">Page URLs</label>
+      <textarea id="gatherIn" rows="5" placeholder="One link per line&#10;https://example.com/references" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+      <div class="row between">
+        <span class="lbl">Redaction</span>
+        <div class="seg" id="gatherMode"><button data-v="blur" type="button">Blur</button><button data-v="box" type="button">Black box</button></div>
+      </div>
+      <p class="hint" id="gatherCaps">Same-site pages only. Depth 2, 25 pages, 200 images. Skips Instagram. No login.</p>
+      <div class="row gap">
+        <button class="btn" id="gatherStart" type="button">Start</button>
+        <button class="btn ghost danger" id="gatherStop" type="button">Stop</button>
+      </div>
+    </div>
+    <div id="gatherLive" class="card hidden">
+      <div class="row between"><span class="card-h" id="gatherNote" style="margin:0">…</span><span class="status" id="gatherState">…</span></div>
+      <div class="gstats">
+        <div class="gstat"><b id="gPages">0</b><span>Pages visited</span></div>
+        <div class="gstat"><b id="gFound">0</b><span>Images found</span></div>
+        <div class="gstat"><b id="gIn">0</b><span>Ingested</span></div>
+        <div class="gstat"><b id="gSkip">0</b><span>Skipped</span></div>
+      </div>
+      <ul class="gerrs" id="gatherErrs"></ul>
+    </div>
+    <div id="gatherList"></div>
   </section>
 
   <!-- GALLERY -->
@@ -205,11 +236,12 @@
 
 <nav class="bottom">
   <button data-tab="upload" class="active"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 20h14" /></svg><span>Upload</span></button>
+  <button data-tab="gather"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M3 12h18M12 4a13 13 0 0 1 0 16M12 4a13 13 0 0 0 0 16"/></svg><span>Gather</span></button>
   <button data-tab="gallery"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span>Gallery</span></button>
   <button data-tab="saved"><svg viewBox="0 0 24 24"><path d="M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4.2-6.5 4.2v-16a1 1 0 0 1 1-1z"/></svg><span>Saved</span></button>
   <button data-tab="docs"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M14 3.5V8h4.5M8 13h8M8 16.5h5"/></svg><span>Docs</span></button>
   <button data-tab="settings"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Settings</span></button>
 </nav>
-<script src="/static/app.js?v=ext2"></script>
+<script src="/static/app.js?v=gather1"></script>
 </body>
 </html>

@@ -23,6 +23,7 @@ Faceoff runs in one Docker container (FastAPI + OpenCV + SQLite). It works on a 
 - [Configuration](#configuration) (env vars and volumes)
 - [Faceoff Sync browser extension](#faceoff-sync-browser-extension)
 - [Using Faceoff](#using-faceoff)
+- [URL gatherer (personal branch)](#url-gatherer-personal-branch)
 - [Keyword redaction (Docs)](#keyword-redaction-docs)
 - [Build from source](#build-from-source)
 - [API overview](#api-overview)
@@ -212,6 +213,38 @@ Use it at your own risk. Automated access may be against Instagram's terms; the 
 
 Saved posts reach Faceoff only through **Faceoff Sync**. There is no cookie paste and no server-side Instagram login: the server never accepts a session cookie or sessionid. Generate a pairing token under **Settings → Browser extension**, install the extension, and press **Resume** when you are ready. The Saved library is unchanged. On startup, Faceoff deletes a leftover `ig_cookie.json` in the data folder if one is still there from an older version. It does not read that file.
 
+## URL gatherer (personal branch)
+
+This section is only on the personal branch. It is not part of the shared Faceoff release. Do not treat it as a public feature and do not merge it to main yet.
+
+The **Gather** tab takes one or more page URLs. Faceoff fetches those pages on the machine it is running on, keeps reference images, and hands each one to the existing auto-process queue. Blur or Box (whichever you pick, or the default) runs the same worker as an upload. The redacted file is written to the export folder, which on the Pi is the Drop share. Instagram sync is unchanged. `instagram.com` and `cdninstagram` links are skipped with a message, because the extension already covers Instagram.
+
+Paste one link per line and press **Start**. The tab shows pages visited, images found, images ingested, skipped images, and errors (403, 404, timeout, not HTML, blocked by robots.txt). **Stop** cancels the running job. The latest run stays on the tab after it finishes or after a restart (a restart marks a running job as stopped).
+
+What it will and will not do:
+
+- Same-site links only, starting from each URL you pasted. It does not follow a link to another host.
+- Images on the page can live on another host (a CDN). Those files are downloaded. Their HTML is not crawled.
+- `robots.txt` is respected. If it cannot be read, that host is skipped.
+- No cookies, passwords, or login. A 401/403 is reported and left alone.
+- One request at a time, with a pause between requests to the same host.
+- The same image is not ingested twice (same URL or same file contents).
+
+Caps (also settable in `.env`):
+
+| Cap | Default | Variable |
+|---|---|---|
+| Link depth | 2 | `GATHER_MAX_DEPTH` |
+| Pages per job | 25 | `GATHER_MAX_PAGES` |
+| Images ingested | 200 | `GATHER_MAX_IMAGES` |
+| Image downloads | 400 | `GATHER_MAX_IMAGE_FETCHES` |
+| Delay per host | 1 second | `GATHER_DELAY_S` |
+| Request timeout | 15 seconds | `GATHER_TIMEOUT_S` |
+| Minimum width and height | 256 px | `GATHER_MIN_PX` |
+| Minimum file size | 64 bytes | `GATHER_MIN_BYTES` |
+
+Icons, favicons, SVG, and pictures smaller than the minimum are skipped. Jpeg, png, webp, and gif are the formats that are kept. Auto-export has to stay on (the default) for the redacted copy to land in Drop.
+
 ## Keyword redaction (Docs)
 
 Docs is a second tool in the same app. It does not run face detection, and the photo Blur/Box settings (padding, sensitivity, blur strength) do not apply to it. Instagram sync is unchanged: the extension notes above still apply to the Saved library, and Docs never talks to Instagram.
@@ -326,6 +359,7 @@ All endpoints are under the same origin as the UI. If `APP_PASSWORD` is set, eve
 | Settings | `GET /api/settings`, `POST /api/settings` |
 | Saved library | `GET /api/saved` (filter, sort, kind, owner, paging), `GET /api/saved/owners`, `GET /api/saved/ids`, `GET /api/saved/batch?ids=`, `GET /api/saved/{id}`, `GET /api/saved/{id}/file/{thumb\|original\|download}` (Range supported), `POST /api/saved/process`, `POST /api/saved/delete` |
 | Extension (token) | `GET /api/ext/control` (pause flag and pacing limits), `POST /api/ext/report` (warning → server pause), `GET /api/ext/ping`, `POST /api/ingest/known`, `POST /api/ingest` (multipart: `meta` JSON + `file`) |
+| URL gatherer (personal branch) | `GET /api/gather`, `POST /api/gather` (JSON: `urls`, optional `mode`), `POST /api/gather/cancel` |
 | Extension admin (UI) | `POST /api/ext/token` (rotate), `DELETE /api/ext/token` (revoke), `POST /api/ext/pause`, `GET /api/ext/download` |
 
 While sync is paused, `POST /api/ingest` and `/api/ingest/known` return `423 Locked`.
@@ -347,6 +381,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 | Test | What it checks | How to run |
 |---|---|---|
 | `tests/ingest_test.py` | Pairing and token auth, CORS, the pause flag (423 while paused, auto-pause on report), ingest → Saved, dedupe, raw IG export layout, thumbnails, Range/416, download attachment headers, processing → export folder, gallery integration and pruning | `DATA_DIR=/tmp/fo EXPORT_DIR=/tmp/fo/x IG_EXPORT_ENABLED=1 IG_EXPORT_DIR=/tmp/fo/ig GALLERY_LIMIT=3 python -m tests.ingest_test` |
+| `tests/gather_test.py` | URL parsing, same-origin crawl caps, robots.txt, image extraction and filtering, gather ingest into the existing process/export path, Saved list stays Instagram-only | `python -m tests.gather_test` |
 | `tests/docs_redact_test.py` | Keyword parsing, preset detection (email, phone, money, address, name, location) and its known misses, whole-word PDF redaction (text layer removed, kept words still visible), presets combined with a custom line, scanned-page OCR when Tesseract is installed, export filename, original bytes untouched, Docs kept out of the photo gallery | `python -m tests.docs_redact_test` |
 | `tests/ext/cfg_merge_test.py` | Blank stored URL/token do not override the default Faceoff URL; a default origin and a custom origin both produce a host-permission pattern; the options page requests that permission before it reads storage. | `python3 tests/ext/cfg_merge_test.py` |
 | `tests/ext/e2e_extension.py` + `tests/ext/mock_ig.py` | Loads the unpacked extension in Chromium against a local HTTPS mock of instagram.com and its CDN. Covers zero requests while paused, baseline, the 3–6 h schedule, backfill gated by the server, a single paced page, and a 429 triggering a 48 h stop plus server auto-pause. | start Faceoff on `127.0.0.1:8088`, run `python3 tests/ext/mock_ig.py`, then `python3 tests/ext/e2e_extension.py` (needs Playwright + Chromium; the mock creates its own throwaway TLS cert) |
@@ -356,7 +391,7 @@ The tests use fixtures and local mocks only, with no real accounts or network ac
 
 ```
 app/            FastAPI app (main.py), face redaction (redact.py), document redaction (keywords.py, presets.py, docwork.py),
-                queue (worker.py), SQLite store (store.py), Saved library (saved.py), static UI (static/)
+                queue (worker.py), SQLite store (store.py), Saved library (saved.py), personal URL gatherer (gather.py), static UI (static/)
 extension/      Faceoff Sync MV3 extension (background.js, cfg.js, content.js, popup, options, icons)
 scripts/        get_model.sh (YuNet download for local dev), build_extension.py (zip for the extension only)
 tools/          logo geometry + icon generator

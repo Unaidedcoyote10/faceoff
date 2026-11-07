@@ -88,8 +88,33 @@ def init_db():
         c.execute("""CREATE TABLE IF NOT EXISTS saved (
             id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE NOT NULL, shortcode TEXT NOT NULL, idx INTEGER NOT NULL,
             owner TEXT, caption TEXT, taken_at REAL, saved_at REAL NOT NULL, kind TEXT NOT NULL, ext TEXT NOT NULL,
-            size INTEGER, width INTEGER, height INTEGER, duration REAL, raw_export_path TEXT, image_id INTEGER)""")
+            size INTEGER, width INTEGER, height INTEGER, duration REAL, raw_export_path TEXT, image_id INTEGER,
+            source TEXT NOT NULL DEFAULT 'extension', page_url TEXT, image_url TEXT)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_saved_at ON saved(saved_at)")
+        scols = {r[1] for r in c.execute("PRAGMA table_info(saved)")}
+        for col, typ in (("source", "TEXT DEFAULT 'extension'"), ("page_url", "TEXT"), ("image_url", "TEXT")):
+            if col not in scols:
+                c.execute(f"ALTER TABLE saved ADD COLUMN {col} {typ}")
+        # Personal URL gatherer: latest job plus URL/hash dedupe. Not part of Instagram ingest.
+        c.execute("""CREATE TABLE IF NOT EXISTS gather_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created REAL NOT NULL,
+            updated REAL NOT NULL,
+            finished REAL,
+            status TEXT NOT NULL,
+            mode TEXT,
+            urls TEXT NOT NULL,
+            pages INTEGER DEFAULT 0,
+            images_found INTEGER DEFAULT 0,
+            images_ingested INTEGER DEFAULT 0,
+            images_skipped INTEGER DEFAULT 0,
+            errors TEXT,
+            ingested TEXT,
+            note TEXT
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS gather_seen (
+            url TEXT PRIMARY KEY, sha256 TEXT NOT NULL, saved_id INTEGER, at REAL NOT NULL)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_gather_sha ON gather_seen(sha256)")
         # Keyword redaction jobs. Separate from the photo gallery so face blur never sees them.
         c.execute("""CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -232,8 +257,10 @@ def prune():
     Results of Saved-library items are never deleted here: they only scroll out of the gallery view; the Saved item,
     its raw file and its processed copy stay."""
     with conn() as c:
+        # source 'saved' is an Instagram library result. source 'url' is a gathered ref.
+        # Both stay with their library row; only ordinary uploads are pruned.
         old = [r[0] for r in c.execute(
-            "SELECT id FROM images WHERE source != 'saved' AND status NOT IN ('queued','processing') AND id NOT IN "
+            "SELECT id FROM images WHERE source NOT IN ('saved', 'url') AND status NOT IN ('queued','processing') AND id NOT IN "
             "(SELECT id FROM images ORDER BY created DESC, id DESC LIMIT ?)", (GALLERY_LIMIT,))]
     for i in old:
         delete_image(i)
@@ -329,6 +356,8 @@ SAVED_SORTS = {"newest": "s.saved_at DESC, s.id DESC", "oldest": "s.saved_at ASC
 
 
 def _owner_where(where, args, owner, kind=None):
+    # Gathered URL refs live in this table so they can be processed, but they are not Instagram saves.
+    where += " AND coalesce(s.source,'extension')!='url'"
     if kind in ("image", "video"):
         where, args = where + " AND s.kind=?", args + [kind]
     if owner == "_unknown":
@@ -368,9 +397,9 @@ def saved_counts(owner=None, kind=None):
 def saved_owners(sort="count", q=""):
     """Accounts in the Saved library: count, latest save, processed count."""
     order = "latest DESC" if sort == "recent" else ("name ASC" if sort == "name" else "n DESC, latest DESC")
-    args, where = [], ""
+    args, where = [], "WHERE coalesce(s.source,'extension')!='url'"
     if q:
-        where = "WHERE lower(coalesce(s.owner,'')) LIKE ?"
+        where += " AND lower(coalesce(s.owner,'')) LIKE ?"
         args.append("%" + q.lower().replace("%", "").replace("_", "\\_") + "%")
         where += " ESCAPE '\\'"
     with conn() as c:
@@ -397,6 +426,83 @@ def saved_delete(sid: int):
     if r.get("image_id"):
         delete_image(r["image_id"])
     return True
+
+
+# ------------------------------------------------------------------ Personal URL gatherer (latest job + dedupe)
+def _gather_row(r):
+    if r is None:
+        return None
+    d = dict(r)
+    for key in ("urls", "errors", "ingested"):
+        try:
+            d[key] = json.loads(d[key]) if d.get(key) else []
+        except (TypeError, ValueError):
+            d[key] = []
+    return d
+
+
+def gather_create(urls, errors, mode: str, status: str, note: str = "") -> int:
+    now = time.time()
+    with _lock, conn() as c:
+        cur = c.execute(
+            """INSERT INTO gather_jobs (created, updated, finished, status, mode, urls, pages, images_found,
+               images_ingested, images_skipped, errors, ingested, note)
+               VALUES (?,?,?,?,?,?,0,0,0,0,?,?,?)""",
+            (now, now, now if status != "running" else None, status, mode, json.dumps(urls),
+             json.dumps(errors or []), "[]", note))
+        return cur.lastrowid
+
+
+def gather_update(id_: int, **kw):
+    if "errors" in kw and not isinstance(kw["errors"], str):
+        kw["errors"] = json.dumps(kw["errors"])
+    if "ingested" in kw and not isinstance(kw["ingested"], str):
+        kw["ingested"] = json.dumps(kw["ingested"])
+    if "urls" in kw and not isinstance(kw["urls"], str):
+        kw["urls"] = json.dumps(kw["urls"])
+    if kw.get("finished") is None:
+        kw.pop("finished", None)
+    kw["updated"] = time.time()
+    with _lock, conn() as c:
+        c.execute(f"UPDATE gather_jobs SET {','.join(k + '=?' for k in kw)} WHERE id=?", [*kw.values(), id_])
+
+
+def gather_get(id_: int):
+    with conn() as c:
+        return _gather_row(c.execute("SELECT * FROM gather_jobs WHERE id=?", (id_,)).fetchone())
+
+
+def gather_latest():
+    with conn() as c:
+        return _gather_row(c.execute("SELECT * FROM gather_jobs ORDER BY id DESC LIMIT 1").fetchone())
+
+
+def gather_mark_interrupted():
+    now = time.time()
+    note = "Stopped because Faceoff restarted."
+    with _lock, conn() as c:
+        c.execute("""UPDATE gather_jobs SET status='error', finished=?, updated=?, note=?
+                     WHERE status IN ('running', 'cancelling')""", (now, now, note))
+
+
+def gather_find(url: str | None = None, sha: str | None = None):
+    with conn() as c:
+        if url:
+            r = c.execute("SELECT url, sha256, saved_id FROM gather_seen WHERE url=?", (url,)).fetchone()
+            if r:
+                return dict(r)
+        if sha:
+            r = c.execute("SELECT url, sha256, saved_id FROM gather_seen WHERE sha256=? LIMIT 1", (sha,)).fetchone()
+            if r:
+                return dict(r)
+    return None
+
+
+def gather_remember(url: str, sha: str, saved_id):
+    with _lock, conn() as c:
+        c.execute("""INSERT INTO gather_seen (url, sha256, saved_id, at) VALUES (?,?,?,?)
+                     ON CONFLICT(url) DO UPDATE SET sha256=excluded.sha256, saved_id=COALESCE(excluded.saved_id, gather_seen.saved_id)""",
+                  (url, sha, saved_id, time.time()))
 
 
 # ------------------------------------------------------------------ Document keyword redaction

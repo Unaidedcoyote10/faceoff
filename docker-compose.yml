@@ -27,6 +27,14 @@ services:
       DOC_DPI: ${DOC_DPI:-144}                  # flatten DPI for redacted PDFs
       DOC_OCR: ${DOC_OCR:-1}                    # 0 disables Tesseract (text PDFs still work)
       DOC_OCR_MAX_SIDE: ${DOC_OCR_MAX_SIDE:-2200}
+      # Personal URL gatherer (this branch). Caps keep a crawl small on a Pi.
+      GATHER_MAX_DEPTH: ${GATHER_MAX_DEPTH:-2}
+      GATHER_MAX_PAGES: ${GATHER_MAX_PAGES:-25}
+      GATHER_MAX_IMAGES: ${GATHER_MAX_IMAGES:-200}
+      GATHER_DELAY_S: ${GATHER_DELAY_S:-1}
+      GATHER_TIMEOUT_S: ${GATHER_TIMEOUT_S:-15}
+      GATHER_MIN_PX: ${GATHER_MIN_PX:-256}
+      GATHER_MIN_BYTES: ${GATHER_MIN_BYTES:-64}
     volumes:
       # Originals, previews and the SQLite DB. Keep this private (not on a shared folder).
       - type: bind
